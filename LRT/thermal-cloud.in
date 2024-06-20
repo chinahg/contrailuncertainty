@@ -1,0 +1,14 @@
+rte_solver disort
+source thermal
+sza 0
+wavelength 2500 80000
+mol_abs_param reptran fine
+umu 1.0
+output_user edir eglo edn eup enet esum
+zout TOA
+output_process integrate
+atmosphere_file US-standard
+quiet
+ic_habit solid-column
+ic_properties yang
+ic_file 1D ice.in
