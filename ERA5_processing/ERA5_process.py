@@ -153,12 +153,10 @@ alt_upper = lib.press2alt(press_upper) # Upper altitude limit [m]
 alt_lower = lib.press2alt(press_lower) # Lower altitude limit [m]
 num_files = len(matching_files)
 redownload = []
-
-## FOR TESTING
-num_files = 10
+T0 = 273.15 # [K] Reference temperature
 
 for k in tqdm.tqdm(range(num_files)): # Look through all matching files
-    print("file: ",k)
+
     current_year = matching_data[k][0][0:4]
     path2file = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/"+str(current_year)+"/"+matching_data[k][0]
 
@@ -186,12 +184,11 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
     # Assign ERA5 data to arrays
     RH_ERA5 = ds_ERA5.r.sel(time=time, latitude=latitude, longitude=longitude, method='nearest').to_numpy() # [%] Water relative humidity
     T = ds_ERA5.t.sel(time=time, latitude=latitude, longitude=longitude, method='nearest').to_numpy() # [K] Temperature
-    print("temperature:",T)
     q = ds_ERA5.q.sel(time=time, latitude=latitude, longitude=longitude, method='nearest').to_numpy() # [kg/kg] Specific humidity
     p = (ds_ERA5.isobaricInhPa).to_numpy()*100 # [Pa] Pressure
-    T0 = 273.15 # [K] Reference temperature
     RH_i = np.zeros(len(T))
     RH_w = np.zeros(len(T))
+    RH_i_placeholder = None
 
     # Calculate relative humidity
     for f in range(len(T)):
@@ -203,64 +200,40 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
         
     RH_len = len(RH_i)
 
-    for i in range(RH_len): # look through all RH datapoints
-        if altitudes[i] >= alt_lower and altitudes[i] <= alt_upper and RH_i[0:i] < 100: # if all values of RH_i are less than 100
-            print("No supersaturation in region of interest")
-            MLD_array_alt.append(0)
-            cruiseRH.append(RH_i[i])
-            break
+    path2file = matching_files[k]
+
+    for i in reversed(range(RH_len)): # Look through all RH values in the file, reverse order as [0] is the lowest altitude
+
+        if altitudes[i] >= alt_lower and altitudes[i] <= alt_upper and isinstance(RH_i[i], (np.floating, float)) and RH_i_placeholder is None: # If RH_i_placeholder is None, save the first value of RH
+            RH_i_placeholder = RH_i[i]
 
         if altitudes[i] >= alt_lower and altitudes[i] <= alt_upper and RH_i[i] >= 100: # if pressure is approx 265 hPa and RH > 100% record RH
-            print("Supersaturation in region of interest")
             # Save RH value where MLD starts
             cruiseRH.append(RH_i[i])
 
             # Save altitude where supersaturated RH starts
             MLD_top = altitudes[i]
 
-            for j in range(i): # Look through list of RH under cruise alt and determine MLD
-                
-                if RH_i[i-j] < 100: # MLD ends when RHi < 100%
-                    MLD_index = i-j
+            for j in reversed(range(i)): # Look through list of RH under cruise alt and determine MLD
+
+                if RH_i[j] < 100: # MLD ends when RHi < 100%
+                    MLD_index = j
                     MLD_bottom = altitudes[MLD_index]
                     break
-        
-                elif j == i:
+                
+                elif j == 0:
                     MLD_bottom = altitudes[0]
                     break
-            
+
             # Now have an array of RH and MLD upper and lower bounds
-        
+
             # Take difference of altitudes to get MLD in [m]
             MLD_array_alt.append(MLD_top-MLD_bottom)
             break
-            
-
-    # for i in range(RH_len): # look through all RH datapoints for this date and location
-    #     # Save every RH value
-    #     cruiseRH.append(RH_i[i])
-
-    #     supersat_bool = lib.check_supersat(RH_i[i], altitudes[i], alt_lower, alt_upper) # Check if supersaturation occurs
-
-    #     if supersat_bool == True:
-    #         # Save altitude where supersaturated RH starts
-    #         MLD_top = altitudes[i]
-
-    #         for j in range(i): # Look through list of RH under cruise alt and determine MLD
-
-    #             if RH_i[i-j] < 100: # MLD ends when RHi < 100%
-    #                 MLD_index = i-j
-    #                 MLD_bottom = altitudes[MLD_index]
-    #                 break
-    #             elif j == i:
-    #                 MLD_bottom = altitudes[0]
-    #                 break
-    #         # Now have an array of RH and MLD upper and lower bounds
-    #         # Take difference of altitudes to get MLD in [m]
-    #         MLD_array_alt.append(MLD_top-MLD_bottom)
         
-    #     else: # If no supersaturation, append 0 to MLD array
-    #         MLD_array_alt.append(0)
+        elif i == 0: # If no values above 100% RH, save the first value
+            cruiseRH.append(RH_i_placeholder) # If no values above 100% RH, save the first value
+            MLD_array_alt.append(0) # If no values above 100% RH, save 0 for MLD
     
     ds_ERA5.close()
 
