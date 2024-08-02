@@ -9,7 +9,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --partition=normal
-#SBATCH --mem=4000MB
+#SBATCH --mem=1000MB
 #####################################
 
 python /home/chinahg/GCresearch/contrailuncertainty/GRUAN_processing/GRUAN_process.py

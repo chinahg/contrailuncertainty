@@ -180,7 +180,7 @@ for k in tqdm.tqdm(range(num_files)): # Look through all GRUAN radiosonde files
 
     for i in reversed(range(RH_len)): # Look through all RH values in the file, reverse order as [0] is the lowest altitude
         
-        if isinstance(RH_i[i], float) and RH_i_placeholder is None: # If RH_i_placeholder is None, save the first value of RH
+        if altitudes[i] >= alt_lower and altitudes[i] <= alt_upper and isinstance(RH_i[i], (np.floating, float)) and RH_i_placeholder is None: # If RH_i_placeholder is None, save the first value of RH
             RH_i_placeholder = RH_i[i]
 
         if altitudes[i] >= alt_lower and altitudes[i] <= alt_upper and RH_i[i] >= 100: # if pressure is approx 265 hPa and RH > 100% record RH
@@ -208,7 +208,6 @@ for k in tqdm.tqdm(range(num_files)): # Look through all GRUAN radiosonde files
             break
         
         elif i == 0: # If no values above 100% RH, save the first value
-            print("Saving first value of RH, ", RH_i_placeholder)
             cruiseRH.append(RH_i_placeholder) # If no values above 100% RH, save the first value
             MLD_array_alt.append(0) # If no values above 100% RH, save 0 for MLD
 
