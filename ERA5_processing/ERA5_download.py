@@ -158,13 +158,13 @@ def download_ERA5_data(time, save_path, variables=ERA5_VARIABLES,
 period_type = "custom" # "continuous" or "custom"
 
 # Custom period settings
-entire_file = True 
+entire_file =False 
 
 # Only specify if entire_file is False
-start_file = 600 # Index of days to start downloading at
-end_file = 694 # Index of days to stop downloading at 
+start_file = 100 # Index of days to start downloading at
+end_file = 200 # Index of days to stop downloading at
 
-csv_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/files2download.csv"
+csv_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/files2download_vel.csv"
 
 if period_type == "continuous":
     # For a continous time period, download ERA5 data
@@ -196,7 +196,7 @@ elif period_type == "custom":
         month = int(date_str[4:6])
         day = int(date_str[6:8])
         date = dt.datetime(year, month, day)
-        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + date.strftime("%Y/%Y_%m_%d.grib")
+        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads_vel/" + date.strftime("%Y_%m_%d.grib")
         download_ERA5_data(date, save_path)
 else:
     raise ValueError("Period type should be either 'continuous' or 'custom'")
