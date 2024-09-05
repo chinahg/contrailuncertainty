@@ -163,9 +163,9 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
     # Read file in the location of interest
     # View data for a single day
     try:
-        ds_ERA5 = xr.open_dataset(path2file,engine='netcdf4')
+        ds_ERA5 = xr.open_dataset(path2file)
     except:
-        ds_ERA5.close()
+        # ds_ERA5.close()
         # Save the name of the corrupted file to redownload later
         redownload.append(path2file)
         continue
@@ -197,6 +197,9 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
         RH_w[f] = 0.263*p[f]*q[f]*(np.exp((17.67*(T[f]-T0))/(T[f]-29.65))**(-1)) # [%] Relative humidity wrt water from specific humidity (WMO No.8 Guide to Instruments and Methods of Observation, Vol 1 Measurement of Meteorological Variables, ANNEX 4.B. FORMULAE FOR THE COMPUTATION OF MEASURES OF HUMIDITY)
         
     RH_i = RH_w*P_sat_w/P_sat_i # [%] Relative humidity wrt ice from relative humidity wrt water
+    
+    if np.isnan(RH_i).any():
+        print("NaN value in RH_i")
         
     RH_len = len(RH_i)
 
@@ -242,7 +245,7 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
 
 ############################################################################################################
 
-# Save data to it's correpsonding ERA5 index
+# Save data to it's corresponding ERA5 index
 # matching_data is a list of lists, each list contains the ERA5 file name, GRUAN site name, and GRUAN datetime object
 # We append the cruiseRH and MLD_array_alt to the matching_data list
 # matching_data is now a list of lists, each list contains the ERA5 file name, GRUAN site name, GRUAN datetime object, cruiseRH [%], and MLD_array_alt [m]
@@ -250,8 +253,8 @@ for i in range(len(cruiseRH)):
     matching_data[i].append(cruiseRH[i])
     matching_data[i].append(MLD_array_alt[i])
 
-# Sort matching data by the GRUAN site name (to match GRUAN data order)
-matching_data.sort(key=lambda x: x[1])
+# # Sort matching data by the GRUAN site name (to match GRUAN data order)
+# matching_data.sort(key=lambda x: x[1])
 
 ############################################################################################################
 

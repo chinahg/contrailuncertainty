@@ -91,7 +91,7 @@ def match_files(GRUAN_date_sites, ERA5_file_names):
         GRUAN_date_formatted =  str(GRUAN_date_sites[i][1]).replace("-", "_")[:10]
         GRUAN_date_nc = GRUAN_date_formatted + '.nc'
         GRUAN_date_grib = GRUAN_date_formatted + '.grib'
-        i = 0
+
         if GRUAN_date_nc in ERA5_file_names:
             filename = [ERA5_file_names[ERA5_file_names.index(GRUAN_date_nc)]]
             site_info = GRUAN_date_sites[i]
