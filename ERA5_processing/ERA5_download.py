@@ -151,9 +151,7 @@ def download_ERA5_data(time, save_path, variables=ERA5_VARIABLES,
     
     c.retrieve("reanalysis-era5-pressure-levels", CDSAPI_settings, save_path)
 
-    
-
-
+############################################################################################################
 ### MAIN SCRIPT ###
 period_type = "custom" # "continuous" or "custom"
 

@@ -80,7 +80,7 @@ import pandas as pd
 # Make array of .nc filenames (grib)
 ERA5_file_names = []
 GRUAN_date_sites = []
-years = np.linspace(2005,2012,num=8,dtype=int)
+years = np.linspace(2005,2021,num=17,dtype=int)
 
 # Make list of all ERA5 file names
 # Need to loop as glob is not capturing all file names
@@ -235,11 +235,14 @@ for k in tqdm.tqdm(range(num_files)): # Look through all matching files
             break
         
         elif i == 0: # If no values above 100% RH, save the first value
+            print("No values above 100% RH")
+            print("RH_i_placeholder: %s" % RH_i_placeholder)
             cruiseRH.append(RH_i_placeholder) # If no values above 100% RH, save the first value
             MLD_array_alt.append(0) # If no values above 100% RH, save 0 for MLD
     
     ds_ERA5.close()
 
+print("Cruise RH: %s" % cruiseRH)
 # MLD_array_alt is appended to for each file, never overwritten
 # cruiseRH is appended to for each file, never overwritten
 
