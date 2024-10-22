@@ -7,5 +7,5 @@ umu 1.0
 output_user edir eglo edn eup enet esum
 zout TOA
 output_process integrate
-atmosphere_file US-standard
+atmosphere_file midlatitude_summer
 quiet

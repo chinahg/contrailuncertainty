@@ -7,8 +7,9 @@ umu 1.0
 output_user edir eglo edn eup enet esum
 zout TOA
 output_process integrate
-atmosphere_file US-standard
+atmosphere_file midlatitude_summer
 ic_habit droxtal
 ic_properties yang
-ic_file 1D ice.in
+ic_file 1D /home/chinahg/GCresearch/contrailuncertainty/LRT/ice.in
+ic_modify tau set 32.09282996716762
 quiet
