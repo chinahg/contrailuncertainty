@@ -9,7 +9,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --partition=normal
-#SBATCH --mem=4000MB
+#SBATCH --mem=6000MB
 #####################################
 
 python /home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_process.py

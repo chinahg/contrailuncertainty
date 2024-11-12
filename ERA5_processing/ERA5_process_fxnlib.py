@@ -27,7 +27,7 @@ def convert_to_datetime(year, month, day, time):
     date_str = f"{year}-{month}-{day}T{time}"
     return np.datetime64(date_str)
 
-def process_GRUAN_filename(string, filepath):
+def process_GRUAN_filename(filepath):
     """
     Process GRUAN filename and extract site name and time information.
 
@@ -41,7 +41,11 @@ def process_GRUAN_filename(string, filepath):
     list
         List containing site name and time information.
     """
-    split_string = string.split("_")
+
+    # Stripping GRUAN datetime and site data from file names so we can match with ERA5 data
+    GRUAN_file_names = os.path.basename(filepath)
+
+    split_string = GRUAN_file_names.split("_")
     site_name = split_string[0][:3]
 
     date_time_raw = split_string[4]
@@ -58,7 +62,7 @@ def process_GRUAN_filename(string, filepath):
     GRUAN_site_info = [site_name, time, filepath]
     return GRUAN_site_info
 
-def match_files(GRUAN_date_sites, ERA5_file_names):
+def match_files(GRUAN_date_sites):
     """
     Match GRUAN dates with ERA5 file names.
 
@@ -87,22 +91,28 @@ def match_files(GRUAN_date_sites, ERA5_file_names):
     files2download = []
     print("Matching GRUAN dates with ERA5 files...")
 
+    ERA5_directory = '/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads'
+    ERA5_file_names = []
+    for root, dirs, files in os.walk(ERA5_directory):
+        for file in files:
+            ERA5_file_names.append(os.path.basename(os.path.join(root, file)))
+    print(ERA5_file_names[0])
+
     for i in tqdm.tqdm(range(len(GRUAN_date_sites))):
-        GRUAN_date_formatted =  str(GRUAN_date_sites[i][1]).replace("-", "_")[:10]
+        GRUAN_date_formatted = str(GRUAN_date_sites[i][1]).replace("-", "_")[:10]
         GRUAN_date_nc = GRUAN_date_formatted + '.nc'
         GRUAN_date_grib = GRUAN_date_formatted + '.grib'
 
         if GRUAN_date_nc in ERA5_file_names:
             filename = [ERA5_file_names[ERA5_file_names.index(GRUAN_date_nc)]]
             site_info = GRUAN_date_sites[i]
-            ERA5_data_matching.append((filename+site_info)) # Save all relevant site data for the date
-            ERA5_name_only.append(filename[0]) # Only save name of file for later use
-            
+            ERA5_data_matching.append((filename + site_info))  # Save all relevant site data for the date
+            ERA5_name_only.append(filename[0])  # Only save name of file for later use
 
-        elif GRUAN_date_grib in ERA5_file_names: # If a GRIB file exists but not a NetCDF file for the date of interest
-            files2convert.append(GRUAN_date_grib) # Save filename to reference later when converting files to nc
+        elif GRUAN_date_grib in ERA5_file_names:  # If a GRIB file exists but not a NetCDF file for the date of interest
+            files2convert.append(GRUAN_date_grib)  # Save filename to reference later when converting files to nc
         else:
-            files2download.append(GRUAN_date_formatted) # Save filename to reference later when downloading files
+            files2download.append(GRUAN_date_formatted)  # Save filename to reference later when downloading files
     
     # Get rid of duplicates and sort
     ERA5_file_names_matching = list(set(ERA5_name_only)) 
@@ -170,18 +180,18 @@ def press2alt(pressure):
 def compute_Psat_w(T):
     """
     Returns water liquid saturation pressure in Pascal.
+    Source: Sonntag (1994)
 
     Parameters
     ----------
-    T : Union[float, np.ndarray]
-        Temperature in Kelvin.
+    T : float
+        Temperature in Kelvin
 
     Returns
     -------
-    Union[float, np.ndarray]
-        H2O liquid saturation pressure in Pascal.
+    float
+        H2O Liquid saturation pressure in Pascal
     """
-    # [Pa] Bolton 1980
     return 100.0 * np.exp(
         -6096.9385 / T
         + 16.635794
@@ -193,18 +203,18 @@ def compute_Psat_w(T):
 def compute_Psat_i(T):
     """
     Returns water solid saturation pressure in Pascal.
+    Source: Sonntag (1990)
 
     Parameters
     ----------
-    T : Union[float, np.ndarray]
-        Temperature in Kelvin.
+    T : float
+        Temperature in Kelvin
 
     Returns
     -------
-    Union[float, np.ndarray]
-        H2O solid saturation pressure in Pascal.
+    float
+        H2O solid saturation pressure in Pascal
     """
-    # [Pa] Guide to Meteorological Instruments and Methods of Observation (CIMO Guide) (WMO, 2008)
     return 100.0 * np.exp(
         -6024.5282 / T
         + 24.7219
