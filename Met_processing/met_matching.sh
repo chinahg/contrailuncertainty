@@ -1,7 +1,7 @@
 #!/bin/bash                                   
 
 #SBATCH --time=48:00:00
-#SBATCH --job-name="Met Processing"
+#SBATCH --job-name="Met Processing 3/3, 24199"
 #SBATCH --mail-type=BEGIN,END
 #SBATCH -o /home/chinahg/GCresearch/contrailuncertainty/Met_processing/slurm_outs/slurm-%j-out
 #xSBATCH -e slurm-%j.err

@@ -40,7 +40,9 @@ ERA5_PRESSURE_LEVELS = ['200',
             '1000',
         ]
 
-ERA5_VARIABLES = ['u_component_of_wind', 'v_component_of_wind', 'vertical_velocity']
+ERA5_VARIABLES = ['relative_humidity', 
+            'specific_cloud_ice_water_content', 'specific_cloud_liquid_water_content', 'specific_humidity',
+            'temperature', 'u_component_of_wind', 'v_component_of_wind', 'vertical_velocity']
 
 
 EXTENT = [-180, 180, 30, 60] # Sub-region extraction [min_lon, max_lon, min_lat, max_lat]
@@ -100,7 +102,7 @@ def get_CDSAPI_settings(time, variables=ERA5_VARIABLES,
                         "day" : f"{str(time.day).rjust(2,'0')}",
                         "time": times, 
                         "area" : extent,
-                        "format" : "grib"
+                        "format" : "netcdf"
                        }
     return CDSAPI_settings
 
@@ -162,7 +164,7 @@ entire_file =False
 start_file = 100 # Index of days to start downloading at
 end_file = 200 # Index of days to stop downloading at
 
-csv_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/files2download_vel.csv"
+csv_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/files2download.csv"
 
 if period_type == "continuous":
     # For a continous time period, download ERA5 data
@@ -174,7 +176,7 @@ if period_type == "continuous":
     day = sdate
 
     while day <= edate:
-        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + day.strftime("%Y/%Y_%m_%d.grib")
+        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + day.strftime("%Y/%Y_%m_%d.nc")
         download_ERA5_data(day, save_path)
         # increment start date by timedelta
         day += delta
@@ -194,7 +196,7 @@ elif period_type == "custom":
         month = int(date_str[4:6])
         day = int(date_str[6:8])
         date = dt.datetime(year, month, day)
-        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads_vel/" + date.strftime("%Y_%m_%d.grib")
+        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + str(year) + "/" + date.strftime("%Y_%m_%d.nc")
         download_ERA5_data(date, save_path)
 else:
     raise ValueError("Period type should be either 'continuous' or 'custom'")

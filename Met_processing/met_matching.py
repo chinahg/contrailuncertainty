@@ -33,20 +33,20 @@ for root, dirs, files in os.walk(gruan_base_dir):
 # Sort the paths
 gruan_file_paths.sort()
 era5_file_paths.sort()
-num_files = len(gruan_file_paths)
+start_file = 16132
+end_file = 24199 #16132 #24198 #len(gruan_file_paths) # Number of files to process per slurm batch
 
 # Define the dimensions
 days = pd.date_range('2005-01-01', '2021-12-31')  # From 2005 to the end of 2021
 E_latitudes = np.linspace(30, 60, int((60 - 30) / 0.25) + 1)  # 0.25 degree increments between 30 and 60 degrees
 E_longitudes = np.linspace(-180, 180, int(360 / 0.25) + 1)  # 0.25 degree increments
-iterator = np.linspace(0, 9, 10, dtype=int)  # PLACEHOLDER, FOR DEBUGGING
 
 # Initialize lists to store data
 valid_combinations = []
 G_data_list = []
 E_RHi = []
 
-for j in tqdm.tqdm(range(num_files)):  # Iterate through the dates
+for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
     # Open the ERA5 file
     E_file_path = era5_file_paths[j]
     E_data = xr.open_dataset(E_file_path)
