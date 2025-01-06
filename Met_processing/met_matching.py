@@ -11,12 +11,6 @@ import met_matching_fxnlib as fxn
 gruan_base_dir = '/home/chinahg/GCresearch/GRUAN_sondes/'
 era5_base_dir = '/home/chinahg/GCresearch/ERA5_downloads/'
 
-# Function to construct ERA5 file path from GRUAN file path
-def construct_era5_path(gruan_file_path):
-    date_str = os.path.basename(gruan_file_path).split('_')[4][:8]
-    era5_file_path = os.path.join(era5_base_dir, date_str[:4], f'{date_str[:4]}_{date_str[4:6]}_{date_str[6:8]}.nc')
-    return era5_file_path
-
 # Arrays to store the paths
 gruan_file_paths = []
 era5_file_paths = []
@@ -26,15 +20,15 @@ for root, dirs, files in os.walk(gruan_base_dir):
     for file in files:
         if file.endswith('.nc'):
             gruan_file_path = os.path.join(root, file)
-            era5_file_path = construct_era5_path(gruan_file_path)
+            era5_file_path = fxn.construct_era5_path(gruan_file_path)
             gruan_file_paths.append(gruan_file_path)
             era5_file_paths.append(era5_file_path)
 
 # Sort the paths
 gruan_file_paths.sort()
 era5_file_paths.sort()
-start_file = 16132
-end_file = 24199 #16132 #24198 #len(gruan_file_paths) # Number of files to process per slurm batch
+start_file = 1
+end_file = 1 #16132 #24198 #len(gruan_file_paths) # Number of files to process per slurm batch
 
 # Define the dimensions
 days = pd.date_range('2005-01-01', '2021-12-31')  # From 2005 to the end of 2021
@@ -64,8 +58,9 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
     G_lat = fxn.fill_nan_with_next(G_data.variables['lat'][:])
     G_lon = fxn.fill_nan_with_next(G_data.variables['lon'][:])
     G_alt = fxn.fill_nan_with_next(G_data.variables['alt'][:])
+    G_T = fxn.fill_nan_with_next(G_data.variables['T'][:])
     G_RHi = G_data.variables['rh_i'][:]
-    G_MLD = fxn.calculate_MLD(G_alt, G_RHi)
+    G_MLD = fxn.calculate_MLD(G_alt, G_RHi, G_T)
 
     E_datetime = E_data.variables['time'][:].values
     E_alt = np.array(fxn.press2alt(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['isobaricInhPa']))
@@ -106,6 +101,7 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
         'G_lat': G_lat,
         'G_lon': G_lon,
         'G_alt': G_alt,
+        'G_T': G_T,
         'G_RHi': G_RHi,
         'G_MLD': G_MLD,
         'G_dt': G_datetime,
