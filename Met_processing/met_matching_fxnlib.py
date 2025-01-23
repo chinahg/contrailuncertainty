@@ -98,23 +98,37 @@ def compute_Psat_w(T):
         + 2.433502 * np.log(T)
     )
 
-def calculate_evaporation_depth(regime_array, altitudes, RHw, T, pressures, type):
+def calculate_evaporation_depth(regime_array, altitudes, RHw, T, pressures, latitude, longitude, met_type):
     # P_sat: Saturation vapor pressure (Pa)
     # RH: Relative humidity wrt ice (unitless)
     # P_atm: Atmospheric pressure (Pa)
     
-    regime_array_ED = regime_array
+    print("Initial Regime Binary:", regime_array)
+    regime_array_ED = regime_array.copy()
     R = 6371*10**3 # Radius of the Earth (m)
-    if type == "ERA5":
-        lat_len =  111320*0.25 # Latitude length (m). The size of a degree of latitude remains fairly constant across the Earth.
-        lon_len =  82730 #2*np.pi*R*np.cos(lat_mean)/360# Longitude length (m), PLACEHOLDER using avg latitude of 42
+    
+    if met_type == "ERA5":
+        # latitude and longitude must be floats describing the location of the GRUAN launch site
+        if isinstance(latitude, float) != True:
+            raise ValueError("Invalid type of", type(latitude) ,". Latitude and Longitude must be floats describing the location of the GRUAN launch site. Did you mean to pass in the GRUAN type parameter?")
+        elif isinstance(longitude, float) != True:
+            raise ValueError("Invalid type of", type(longitude) ,". Latitude and Longitude must be floats describing the location of the GRUAN launch site. Did you mean to pass in the GRUAN type parameter?")
+        
+        lat_len = 111320*0.25 # Latitude length (m). The size of a degree of latitude remains fairly constant across the Earth.
+        lon_len = np.abs((2*np.pi*R*np.cos(latitude)/360)*0.25) # Longitude length (m), Haverside function
         heights = np.diff(altitudes) # Height of the gridcell (m)
         V = heights*lat_len*lon_len # volume of air in m^3
         
-    elif type == "GRUAN": #PLACEHOLDERS FOR NOW
-        lat_len = 0 # Latitude length (m)
-        lon_len = 0 # Longitude length (m)
-        height = 0 # Height of the gridcell (m)
+    elif met_type == "GRUAN":
+        # latitude and longitude are altitude/pressure dependent arrays of floats describing the path of the radiosonde
+        if isinstance(latitude, float) == True:
+            raise ValueError("Invalid type of", type(latitude) ,". Latitude and Longitude must be arrays of floats describing the path of the GRUAN radiosonde. Did you mean to pass in the ERA5 type parameter?")
+        elif isinstance(longitude, float) == True:
+            raise ValueError("Invalid type of", type(longitude),". Latitude and Longitude must be arrays of floats describing the path of the GRUAN radiosonde. Did you mean to pass in the ERA5 type parameter?")
+        
+        lat_len = np.abs(111320*np.diff(latitude)) # Latitude length (m)
+        lon_len = np.abs((2*np.pi*R*np.cos(averages_between_elements(latitude))/360)*(np.diff(longitude))) # Longitude length (m), Haverside function
+        height = np.diff(altitudes) # Height of the gridcell (m)
         V = height*lat_len*lon_len # volume of air in m^3
     
     else:
@@ -122,33 +136,39 @@ def calculate_evaporation_depth(regime_array, altitudes, RHw, T, pressures, type
 
     contrail_molecules_water = 0 # Initialize the amount of water molecules in the volume of air
     for i in range (len(regime_array)):
-            # If regime_array[i] == 1, the altitude is supersaturated
-            if regime_array[i] == 1:
-                print("Initially Supersaturated: regime_array is 1")
-                # Calculate water picked up in supersaturated zone
-                P_sat = lib.compute_Psat_w(T[i])
-                P_atm = pressures[i]
-                ppmv = (P_sat/P_atm)*(RHw[i])*10**6 # ppmv
-                contrail_molecules_water = contrail_molecules_water + ppmv*V[i] # molecules of water in the volume of air
+        
+        # If regime_array[i] == 1, the altitude is supersaturated
+        if regime_array[i] == 1:
+            print("Initially Supersaturated: regime_array is 1")
+            # Calculate water picked up in supersaturated zone
+            P_sat = compute_Psat_w(T[i]) # [Pa]
+            P_atm = pressures[i] # [Pa]
+            ppmv = (P_sat/P_atm)*(RHw[i])*10**6 # ppmv
+            contrail_molecules_water = contrail_molecules_water + ppmv*V[i] # molecules of water in the volume of air
 
-            else:
-                print("Initially Subsaturated: regime_array is 0")
-                # Calculate water deposited in subsaturated zone
-                sat_water_molecules = (P_sat/P_atm)*10**6*V[i] # For RH = 1, molecules of water in the volume of air required for saturation
-                background_molecules_water = (P_sat/P_atm)*(RHw[i])*10**6*V[i] # For RH < 1, molecules of water actually in the volume of air
-                contrail_molecules_water = contrail_molecules_water - (sat_water_molecules - background_molecules_water) # Amount of water molecules deposited in the volume of air by the contrail
-                print("Remaining ppm:", contrail_molecules_water)
+        else:
+            print("Initially Subsaturated: regime_array is 0")
+            # Calculate water deposited in subsaturated zone
+            P_sat = compute_Psat_w(T[i]) # [Pa]
+            P_atm = pressures[i] # [Pa]
+            contrail_molecules_water_initial = contrail_molecules_water
+            sat_molecules_water = (P_sat/P_atm)*10**6*V[i] # For RH = 1, molecules of water in the volume of air required for saturation
+            background_molecules_water = (P_sat/P_atm)*(RHw[i])*10**6*V[i] # For RH < 1, molecules of water actually in the volume of air
+            contrail_molecules_water = contrail_molecules_water - (sat_molecules_water - background_molecules_water) # Amount of water molecules deposited in the volume of air by the contrail
+            print("Available water:", f"{contrail_molecules_water_initial :.2e}", 
+                  "Saturation Req:", f"{sat_molecules_water - background_molecules_water:.2e}", 
+                  "Remaining ppm:", f"{contrail_molecules_water:.2e}")
 
-            # When contrail_molecules_water = 0, the contrail has evaporated
-            if contrail_molecules_water > 0:
-                regime_array_ED[i] = 1 # Mark subsaturated binary as supersaturated (evaporation depth)
-            else:
-                contrail_molecules_water = 0 # Reset the amount of water molecules in the volume of air
-                print("Contrail Death, ppm reset: ", contrail_molecules_water, " ppm")
-            
-            print("Molecules of water at altitude ", altitudes[i], "are: ", contrail_molecules_water, "\n")
+        # When contrail_molecules_water = 0, the contrail has evaporated
+        if contrail_molecules_water > 0:
+            regime_array_ED[i] = 1 # Mark subsaturated binary as supersaturated (evaporation depth)
+        else:
+            contrail_molecules_water = 0 # Reset the amount of water molecules in the volume of air
+            print("Contrail Death, ppm reset: ", contrail_molecules_water, " ppm")
+        
+        print("Molecules of contrail water at altitude ", altitudes[i], "are:", f"{contrail_molecules_water:.2e}\n")
+    print("Evaporation Depth Regime Binary:", regime_array_ED)
     return regime_array_ED
-
 
 def calculate_MLD(altitudes, pressures, humidities, temperatures, met_type):
     # Convert arrays to read as floats

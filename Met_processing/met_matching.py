@@ -60,9 +60,12 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
     G_alt = fxn.fill_nan_with_next(G_data.variables['alt'][:])
     G_T = fxn.fill_nan_with_next(G_data.variables['T'][:])
     G_RHi = G_data.variables['rh_i'][:]
-    G_MLD = fxn.calculate_MLD(G_alt, G_RHi, G_T)
+    G_pres = fxn.fill_nan_with_next(G_data.variables['pres'][:])
+    G_MLD = fxn.calculate_MLD(G_alt, G_pres, G_RHi, G_T, "GRUAN")
 
     E_datetime = E_data.variables['time'][:].values
+    E_pres = E_data.variables['level'][:].values
+    E_T = E_data.variables['temp'][:].values
     E_alt = np.array(fxn.press2alt(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['isobaricInhPa']))
 
     # Have to average over the GRUAN data to regrid it to ERA5 size 
@@ -92,7 +95,7 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
 
     E_RHi_avg = np.array(E_RHi_avg)
 
-    E_MLD = np.array(fxn.calculate_MLD(E_alt, E_RHi_avg))
+    E_MLD = np.array(fxn.calculate_MLD(E_alt, E_pres, E_RHi_avg, E_T, "ERA5"))
     E_alt = np.array(np.unique(E_alt))
 
     # Create a dictionary for the current data
