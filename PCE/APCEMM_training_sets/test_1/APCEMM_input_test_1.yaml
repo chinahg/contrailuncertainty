@@ -12,7 +12,7 @@ SIMULATION MENU:
     Num Monte Carlo runs (int): 2
   # Where APCEMM output for this set of runs will go
   OUTPUT SUBMENU:
-    Output folder (string): /home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/outputs/
+    Output folder (string): /home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/outputs/test_1_run_8
     Overwrite if folder exists (T/F): T
   # FFT options (for spectral solver)
   Use threaded FFT (T/F): F
@@ -139,7 +139,7 @@ METEOROLOGY MENU:
   # --- MET INPUT OPTIONS ---+
   METEOROLOGICAL INPUT SUBMENU:
     Use met. input (T/F): T
-    Met input file path (string): "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_1/BASE_APCEMM_input.nc"
+    Met input file path (string): "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_1/APCEMM_met_run_8.nc"
     # Frequency of met data availability
     Time series data timestep [hr] (double): 1.0
     # If off, uses the parameter specified in METEOROLOGICAL PARAMETERS SUBMENU
