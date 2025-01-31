@@ -1,4 +1,0 @@
-/var/spool/slurm/d/job476542/slurm_script: line 15: cd: /home/chinahg/GCresearch/APCEMM/examples/Example3_met_input/input.yaml: Not a directory
-terminate called after throwing an instance of 'std::filesystem::__cxx11::filesystem_error'
-  what():  filesystem error: cannot make canonical path: No such file or directory [input.yaml]
-/var/spool/slurm/d/job476542/slurm_script: line 17: 2093871 Aborted                 (core dumped) /home/chinahg/GCresearch/APCEMM/Code.v05-00/APCEMM input.yaml

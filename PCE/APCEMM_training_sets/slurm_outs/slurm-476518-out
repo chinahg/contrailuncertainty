@@ -1,4 +1,0 @@
- -> Running case 0 on thread 0
-running epm... 
-ERROR: In Engine::OpenFile: Cannot read (/home/chinahg/GCresearch/contrailuncertainty/input_data/ENG_EI.txt)
-slurmstepd: error: *** JOB 476518 ON c010 CANCELLED AT 2024-10-15T23:44:33 DUE TO TIME LIMIT ***

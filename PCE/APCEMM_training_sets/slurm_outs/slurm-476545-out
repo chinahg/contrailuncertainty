@@ -1,5 +1,0 @@
- -> Running case 0 on thread 0
-running epm... 
-Calculated Timestep: 10[min]
-/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/
-/var/spool/slurm/d/job476545/slurm_script: line 17: 2094117 Segmentation fault      (core dumped) ./../../../APCEMM/Code.v05-00/APCEMM input.yaml

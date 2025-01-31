@@ -1,8 +1,0 @@
- -> Running case 0 on thread 0
-running epm... 
-Calculated Timestep: 10[min]
-/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/
-terminate called after throwing an instance of 'netCDF::exceptions::NcException'
-  what():  No such file or directory
-file: /home/chinahg/GCresearch/APCEMM/Code.v05-00/submodules/vcpkg/buildtrees/netcdf-cxx4/src/e3eb217ad8-faf27bae26.clean/cxx4/ncFile.cpp  line:88
-/var/spool/slurm/d/job476535/slurm_script: line 17: 2092636 Aborted                 (core dumped) /home/chinahg/GCresearch/APCEMM/Code.v05-00/APCEMM /home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/input.yaml
