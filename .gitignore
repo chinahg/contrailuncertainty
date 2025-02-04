@@ -1,0 +1,11 @@
+*.pyc
+__pycache__/
+*-out
+*-checkpoint.ipynb
+.ipynb_checkpoints/
+slurm_outs/
+ts_aerosol*.nc
+Micro000000.out
+status_case*
+AEIC_2022_30Nto60N/
+OAG2022.csv

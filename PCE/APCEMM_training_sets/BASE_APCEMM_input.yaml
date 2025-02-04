@@ -47,7 +47,7 @@ PARAMETER MENU:
   #                        : Example: 200:240 will generate values for the parameter in between 200 and 240
 
   # Maximum simulation time if contrail isn't gone by then:
-  Plume Process [hr] (double): 12
+  Plume Process [hr] (double): 20
 
   # Temperature, RH, and wind shear can be overwritten if using meteorological input files
   METEOROLOGICAL PARAMETERS SUBMENU:
