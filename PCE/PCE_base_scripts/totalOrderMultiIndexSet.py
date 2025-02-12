@@ -9,7 +9,7 @@ def totalOrderMultiIndices(m, p):
     Parameters
     ----------
     m : int 
-        Number of uncertain variables
+        Number of index components.
     p : int
         Maximum total degree (sum of degrees across a multiindex)
 
