@@ -91,12 +91,12 @@ def match_files(GRUAN_date_sites):
     files2download = []
     print("Matching GRUAN dates with ERA5 files...")
 
-    ERA5_directory = '/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads'
+    ERA5_directory = '/home/chinahg/GCresearch/ERA5_downloads'
+    
     ERA5_file_names = []
     for root, dirs, files in os.walk(ERA5_directory):
         for file in files:
             ERA5_file_names.append(os.path.basename(os.path.join(root, file)))
-    print(ERA5_file_names[0])
 
     for i in tqdm.tqdm(range(len(GRUAN_date_sites))):
         GRUAN_date_formatted = str(GRUAN_date_sites[i][1]).replace("-", "_")[:10]
@@ -240,3 +240,4 @@ def check_supersat(RH_i, altitudes, alt_lower, alt_upper):
         return True
     else:
         return False
+    

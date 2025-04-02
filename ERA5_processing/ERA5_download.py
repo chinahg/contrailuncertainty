@@ -6,6 +6,7 @@ import csv
 import cdsapi
 from zarr.errors import GroupNotFoundError
 
+# Downloading ERA5 data
 ### FUNCTION LIBRARY ###
 def read_csv_file(file_path):
     """
@@ -153,50 +154,56 @@ def download_ERA5_data(time, save_path, variables=ERA5_VARIABLES,
     
     c.retrieve("reanalysis-era5-pressure-levels", CDSAPI_settings, save_path)
 
-############################################################################################################
-### MAIN SCRIPT ###
-period_type = "custom" # "continuous" or "custom"
+def request_ERA5_data(period_type, csv_path, entire_file, start_file, end_file):
+    if period_type == "continuous":
+        # For a continous time period, download ERA5 data
+        # Call function of choice
+        sdate = dt.datetime(2016, 1, 12) # Start date # EDITABLE
+        edate = dt.datetime(2016, 1, 12) # End date # EDITABLE
+        delta = dt.timedelta(days=1) # Timestep
 
-# Custom period settings
-entire_file =False 
+        day = sdate
 
-# Only specify if entire_file is False
-start_file = 100 # Index of days to start downloading at
-end_file = 200 # Index of days to stop downloading at
+        while day <= edate:
+            save_path = "/home/chinahg/GCresearch/ERA5_downloads/" + day.strftime("%Y/%Y_%m_%d.nc")
+            download_ERA5_data(day, save_path)
+            # increment start date by timedelta
+            day += delta
 
-csv_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/files2download.csv"
+    elif period_type == "custom":
+        # For a custom time period, download ERA5 data
+        # Call the function to read the CSV file
+        files2download = read_csv_file(csv_path)
 
-if period_type == "continuous":
-    # For a continous time period, download ERA5 data
-    # Call function of choice
-    sdate = dt.datetime(2016, 1, 12) # Start date # EDITABLE
-    edate = dt.datetime(2016, 1, 12) # End date # EDITABLE
-    delta = dt.timedelta(days=1) # Timestep
+        if entire_file == True:
+            start_file = 0
+            end_file = len(files2download)
 
-    day = sdate
+        for i in range(start_file, end_file):
+            date_str = files2download[i]
+            year = int(date_str[:4])
+            month = int(date_str[4:6])
+            day = int(date_str[6:8])
+            date = dt.datetime(year, month, day)
+            save_path = "/home/chinahg/GCresearch/ERA5_downloads/" + str(year) + "/" + date.strftime("%Y_%m_%d.nc")
+            download_ERA5_data(date, save_path)
+    else:
+        raise ValueError("Period type should be either 'continuous' or 'custom'")
 
-    while day <= edate:
-        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + day.strftime("%Y/%Y_%m_%d.nc")
-        download_ERA5_data(day, save_path)
-        # increment start date by timedelta
-        day += delta
+# Import the pipeline module variables dynamically
+import importlib.util
+file_path = "/home/chinahg/GCresearch/contrailuncertainty/pipeline.py"
 
-elif period_type == "custom":
-    # For a custom time period, download ERA5 data
-    # Call the function to read the CSV file
-    files2download = read_csv_file(csv_path)
+# Load the module dynamically
+spec = importlib.util.spec_from_file_location("pipeline", file_path)
+pipeline = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pipeline)
 
-    if entire_file == True:
-        start_file = 0
-        end_file = len(files2download)
-        
-    for i in range(start_file, end_file):
-        date_str = files2download[i]
-        year = int(date_str[:4])
-        month = int(date_str[4:6])
-        day = int(date_str[6:8])
-        date = dt.datetime(year, month, day)
-        save_path = "/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/ERA5_downloads/ERA5_downloads/" + str(year) + "/" + date.strftime("%Y_%m_%d.nc")
-        download_ERA5_data(date, save_path)
-else:
-    raise ValueError("Period type should be either 'continuous' or 'custom'")
+# Import only the specific variables you need
+period_type = getattr(pipeline, 'period_type', None)  # Fallback to None if not found
+entire_file = getattr(pipeline, 'entire_file', None)
+start_index = getattr(pipeline, 'start_index', None)
+end_index = getattr(pipeline, 'end_index', None)
+csv_path = getattr(pipeline, 'csv_path', None)
+
+request_ERA5_data(period_type, csv_path, entire_file, start_index, end_index)
