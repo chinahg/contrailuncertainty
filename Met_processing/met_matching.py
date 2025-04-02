@@ -1,3 +1,5 @@
+########################################################################################################################################
+# Imports
 import xarray as xr
 import numpy as np
 import pandas as pd
@@ -5,42 +7,44 @@ import netCDF4 as nc
 import os
 from datetime import datetime, timedelta
 import tqdm
-import met_matching_fxnlib as fxn
+import importlib.util
+# Import functions from the pipeline_fxn_lib.py script
+function_library_path = "/home/chinahg/GCresearch/contrailuncertainty/start_here/pipeline_fxn_lib.py"
+spec = importlib.util.spec_from_file_location("fxn", function_library_path)
+fxn = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fxn)
 
-# Base directories
-gruan_base_dir = '/home/chinahg/GCresearch/GRUAN_sondes/'
-era5_base_dir = '/home/chinahg/GCresearch/ERA5_downloads/'
+# Import the user defined variables from the preprocess_pipeline.py script
+import_path = "/home/chinahg/GCresearch/contrailuncertainty/preprocess_pipeline.py"
+pipeline = importlib.util.spec_from_file_location("preprocess_pipeline", import_path)
+preprocess_pipeline = importlib.util.module_from_spec(pipeline)
+pipeline.loader.exec_module(preprocess_pipeline)
 
-# Arrays to store the paths
-gruan_file_paths = []
-era5_file_paths = []
+# Import only the specific variables you need
+start_file = getattr(preprocess_pipeline, 'start_file', None)  # Fallback to None if not found
+end_file = getattr(preprocess_pipeline, 'end_file', None)
+era5_file_paths = getattr(preprocess_pipeline, 'era5_file_paths', None)
+gruan_file_paths = getattr(preprocess_pipeline, 'gruan_file_paths', None)
+batch = getattr(preprocess_pipeline, 'batch', None)
+########################################################################################################################################
 
-# Recursively find all GRUAN files and construct corresponding ERA5 file paths
-for root, dirs, files in os.walk(gruan_base_dir):
-    for file in files:
-        if file.endswith('.nc'):
-            gruan_file_path = os.path.join(root, file)
-            era5_file_path = fxn.construct_era5_path(gruan_file_path)
-            gruan_file_paths.append(gruan_file_path)
-            era5_file_paths.append(era5_file_path)
-
-# Sort the paths
-gruan_file_paths.sort()
-era5_file_paths.sort()
-start_file = 1
-end_file = 1 #16132 #24198 #len(gruan_file_paths) # Number of files to process per slurm batch
+### Begin main script
+print(f"Processing files from {start_file} to {end_file}...")
+print(f"First ERA5 file: {era5_file_paths[start_file]}")
 
 # Define the dimensions
-days = pd.date_range('2005-01-01', '2021-12-31')  # From 2005 to the end of 2021
+days = pd.date_range('2005-01-01', '2021-12-31') # From 2005 to the end of 2021
 E_latitudes = np.linspace(30, 60, int((60 - 30) / 0.25) + 1)  # 0.25 degree increments between 30 and 60 degrees
 E_longitudes = np.linspace(-180, 180, int(360 / 0.25) + 1)  # 0.25 degree increments
 
 # Initialize lists to store data
 valid_combinations = []
 G_data_list = []
-E_RHi = []
 
 for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
+    # Initialize lists to store data for the current file
+    E_RHi_regrid = []
+
     # Open the ERA5 file
     E_file_path = era5_file_paths[j]
     E_data = xr.open_dataset(E_file_path)
@@ -58,44 +62,29 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
     G_lat = fxn.fill_nan_with_next(G_data.variables['lat'][:])
     G_lon = fxn.fill_nan_with_next(G_data.variables['lon'][:])
     G_alt = fxn.fill_nan_with_next(G_data.variables['alt'][:])
-    G_T = fxn.fill_nan_with_next(G_data.variables['T'][:])
+    G_T = fxn.fill_nan_with_next(G_data.variables['temp'][:])
     G_RHi = G_data.variables['rh_i'][:]
-    G_pres = fxn.fill_nan_with_next(G_data.variables['pres'][:])
-    G_MLD = fxn.calculate_MLD(G_alt, G_pres, G_RHi, G_T, "GRUAN")
+    G_pres = fxn.fill_nan_with_next(G_data.variables['press'][:])
+    G_MLD = fxn.calculate_MLD(G_alt, G_pres, G_RHi, G_T, G_lat, G_lon, "GRUAN")
 
     E_datetime = E_data.variables['time'][:].values
-    E_pres = E_data.variables['level'][:].values
-    E_T = E_data.variables['temp'][:].values
+    E_pres = np.array(E_data.variables['isobaricInhPa'][:].values)
+    E_T = np.array(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['t'])
     E_alt = np.array(fxn.press2alt(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['isobaricInhPa']))
+    E_lat = float(E_data.latitude.sel(latitude=G_lat[0], method='nearest').values)
+    E_lon = float(E_data.longitude.sel(longitude=G_lon[0], method='nearest').values)
+    E_RHi = np.array(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['RH_i'])
 
-    # Have to average over the GRUAN data to regrid it to ERA5 size 
+    # Regrid the E_RHi data to match the G_alt data dimension 
     indexer = len(G_alt)
     for i in range(indexer):
-        E_RHi.append(np.array(E_data.sel(latitude=G_lat[i], longitude=G_lon[i], isobaricInhPa=fxn.alt2press(G_alt[i]), time=G_datetime[i], method='nearest')['RH_i']))
+        E_RHi_regrid.append(np.array(E_data.sel(latitude=G_lat[i], longitude=G_lon[i], isobaricInhPa=fxn.alt2press(G_alt[i]), time=G_datetime[i], method='nearest')['RH_i']))
+    E_RHi_regrid = np.array(E_RHi_regrid)
 
-    # Find the index ranges for where the G_alt values fall within the E_alt values
-    index_ranges = []
-    for i in range(len(G_alt)):
-        for j in range(len(E_alt) - 1):
-            if G_alt[i] >= E_alt[j] and G_alt[i] < E_alt[j + 1]:
-                index_ranges.append(j)
-                break
-        if G_alt[i] >= E_alt[-1]:
-            index_ranges.append(j)
+    # Linearly diffuse the data as a user would when using the ERA5 data
+    E_RHi_diffused = fxn.linear_diffusion(E_RHi_regrid)
 
-    # Average the RHi values in E_RHi based on index_ranges
-    E_RHi_avg = []
-    for i in range(len(E_alt)):
-        indices = [idx for idx, val in enumerate(index_ranges) if val == i]
-        if indices:
-            avg_rhi = np.mean([E_RHi[idx] for idx in indices])
-            E_RHi_avg.append(avg_rhi)
-        else:
-            E_RHi_avg.append(np.nan)  # If no indices found, append NaN
-
-    E_RHi_avg = np.array(E_RHi_avg)
-
-    E_MLD = np.array(fxn.calculate_MLD(E_alt, E_pres, E_RHi_avg, E_T, "ERA5"))
+    E_MLD = np.array(fxn.calculate_MLD(E_alt, E_pres, E_RHi, E_T, E_lat, E_lon, "ERA5"))
     E_alt = np.array(np.unique(E_alt))
 
     # Create a dictionary for the current data
@@ -109,7 +98,9 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
         'G_MLD': G_MLD,
         'G_dt': G_datetime,
         'E_alt': E_alt,
-        'E_RHi': E_RHi_avg,
+        'E_RHi': E_RHi,
+        'E_RHi_diffused': E_RHi_diffused,
+        'E_T': E_T,
         'E_MLD': E_MLD,
         'E_dt': E_datetime
     }
@@ -125,6 +116,10 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
 
 # Convert G_data_list to a DataFrame
 df = pd.DataFrame(G_data_list)
+
+# Squash the MLD binary array into a single string for each row (to allow for parquet conversion)
+df['G_MLD'] = df['G_MLD'].apply(lambda x: ','.join(map(str, x)))
+df['E_MLD'] = df['E_MLD'].apply(lambda x: ','.join(map(str, x)))
 
 # Convert valid combinations into a MultiIndex
 index = pd.MultiIndex.from_tuples(valid_combinations, names=['day', 'E_latitude', 'E_longitude'])
@@ -143,5 +138,5 @@ else:
 df.set_index(index, inplace=True)
 
 # Save the DataFrame to a parquet file
-df.to_parquet('/home/chinahg/GCresearch/contrailuncertainty/Met_processing/final_met_data.parquet')
+df.to_parquet('/home/chinahg/GCresearch/contrailuncertainty/Met_processing/final_met_data_'+str(batch)+'.parquet')
 print("Data saved to final_met_data.parquet.")
