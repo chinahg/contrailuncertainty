@@ -8,6 +8,11 @@ import pandas as pd
 import xarray as xr
 import tqdm
 import netCDF4 as nc
+import shutil
+import yaml
+from numpy.polynomial.hermite_e import HermiteE
+import scipy as sc
+
 ##############################################################################################################################################
 
 # Function library for pipeline
@@ -66,6 +71,8 @@ def check_files(GRUAN_base_dir, years):
 
         # Write the array to the CSV file
         writer.writerow(files2convert)
+    
+    return files2convert, GRUAN_date_sites
 
 def convert_files(data_dir, files2convert):
     # Convert unconverted GRIB files to netCDF
@@ -683,12 +690,16 @@ def linear_diffusion(arr):
     return result
 
 def construct_complementary_paths(gruan_base_dir, era5_base_dir):
+    # Arrays to store the paths
+    gruan_file_paths = []
+    era5_file_paths = []
+    
     # Recursively find all GRUAN files and construct corresponding ERA5 file paths
     for root, dirs, files in os.walk(gruan_base_dir):
         for file in files:
             if file.endswith('.nc'):
                 gruan_file_path = os.path.join(root, file)
-                era5_file_path = fxn.construct_era5_path(era5_base_dir, gruan_file_path)
+                era5_file_path = construct_era5_path(era5_base_dir, gruan_file_path)
                 if os.path.exists(era5_file_path):  # Check if the ERA5 file path exists
                     gruan_file_paths.append(gruan_file_path)
                     era5_file_paths.append(era5_file_path)
@@ -699,22 +710,73 @@ def construct_complementary_paths(gruan_base_dir, era5_base_dir):
     return gruan_file_paths, era5_file_paths
 
 ############################################################################################################################################################
-# Part 3: Generate APCEMM input files
+# Part 3a: Generate APCEMM input files
 
-def generate_apcemm_input_files(base_met_dir, num_met_files, test_num, set_type):
+class APCEMMConfig:
+    def __init__(self):
+        # Specify the test
+        self.aircraft_engine = "B737-800_CFM56"  # Which aircraft and engine are we using?
+        self.test_id = "test_10"  # Test number the met and YAML files are associated with
+        self.training_runs = 20  # Number of APCEMM runs to process for the test
+        self.validation_runs = 20  # Number of APCEMM runs to process for the test
+        self.polynomial_degree = 1  # Polynomial degree for the PCE
+        self.maximum_degree = 2  # Maximum degree for the PCE
+
+        # Define the meteorological APCEMM file dimensions
+        self.APCEMM_altitudes = 125  # Number of altitudes recorded in meteorological file
+        self.APCEMM_timesteps = 24  # Hours recorded in meteorological file
+
+        # RHi initial condition distribution details
+        self.IC_std_rhi = 10
+        self.IC_mean_amplitude_rhi = 117
+        # RHi temporal distribution details
+        self.time_std_rhi = 0
+        self.time_mean_amplitude_rhi = 0
+
+        # MLD initial condition distribution details
+        self.IC_std_mld = 20
+        self.IC_mean_amplitude_mld = 100
+        # MLD temporal distribution details
+        self.time_std_mld = 0
+        self.time_mean_amplitude_mld = 0
+
+def combine_parquet_files(input_dir, output_file):
+    """
+    Combine all Parquet files in the input directory into a single Parquet file.
+
+    Parameters
+    ----------
+    input_dir : str
+        Path to the directory containing the Parquet files.
+    output_file : str
+        Path to save the combined Parquet file.
+    """
+    # Get a list of all Parquet files in the input directory
+    parquet_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.parquet')]
+    
+    # Read and concatenate all Parquet files into a single DataFrame
+    combined_df = pd.concat([pd.read_parquet(f) for f in parquet_files], ignore_index=True)
+    
+    # Save the combined DataFrame to a single Parquet file
+    combined_df.to_parquet(output_file, index=False)
+
+    return combined_df
+
+def generate_apcemm_input_files(base_met_dir, num_met_files, set_type, test_specifications):
     # Set up output path
     if set_type == "validation":
-        out_path = '/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/inputs/{}/APCEMM_met_validation_{}.nc'
+        out_path = '/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/inputs/validation/APCEMM_met_validation_{}.nc'
     else:
-        out_path = '/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/inputs/{}/APCEMM_met_{}.nc'
+        out_path = '/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/inputs/training/APCEMM_met_{}.nc'
     output_file_template = out_path
 
     for run_num in range(1,num_met_files+1):
+
         # Sample initial condition, throwing out entries under threshold
         low_RHi_IC = True
         while low_RHi_IC == True:
             # Sample stochastic RHi initial condition
-            RHi_IC = np.round(np.random.normal(mean_norm, std_norm, size=1) + IC_scaled_mean, 2)
+            RHi_IC = np.round(np.random.normal(0, test_specifications.IC_std_rhi, size=1) + test_specifications.IC_mean_amplitude_rhi, 2)
             if RHi_IC[0] >= 117:
                 low_RHi_IC = False
 
@@ -722,7 +784,7 @@ def generate_apcemm_input_files(base_met_dir, num_met_files, test_num, set_type)
         flag_negative = True
         while flag_negative == True:
             # Sample fluctuations in RH values, centered around IC mean from ERA5 ensembles
-            RHi_time_samples = np.round(np.random.normal(mean_norm_time, std_norm_time, size=timesteps-1) + RHi_IC[0], 2)
+            RHi_time_samples = np.round(np.random.normal(0, test_specifications.time_std_rhi, size=test_specifications.APCEMM_timesteps-1) + test_specifications.time_mean_amplitude_rhi, 2)
 
             # Check if RH_sampled has any zero or negative values
             if np.any(RHi_time_samples <= 0):
@@ -734,7 +796,7 @@ def generate_apcemm_input_files(base_met_dir, num_met_files, test_num, set_type)
         # Consolidate the sampled RHi values into a matrix
         RHi_time = np.append(RHi_IC, RHi_time_samples)
 
-        RHi_sampled_matrix = np.tile(RHi_time, (16, 1)) # Replacing only 16 altitude layers with samples. The rest are predefined as subsaturated.
+        RHi_sampled_matrix = np.tile(RHi_time, (16, 1)) # Replacing only 16 altitude layers with samples. The rest are predefined as subsaturated. #MUST BE UPDATED WITH MLD ADDITION
 
         # Open the input NetCDF file containing the base metoeorological data
         ds = xr.open_dataset(base_met_dir)
@@ -743,17 +805,18 @@ def generate_apcemm_input_files(base_met_dir, num_met_files, test_num, set_type)
         ds['relative_humidity_ice'][90:106, :] = RHi_sampled_matrix
 
         # Save the changes to new output files
-        output_file_path = output_file_template.format(test_num, set_type, run_num)
+        output_file_path = output_file_template.format(test_specifications.test_id, run_num)
         ds.to_netcdf(output_file_path)
         ds.close()
         # Generate associated YAML file
-        generate_yaml_file(test_num, set_type, run_num)
+        generate_yaml_file(test_specifications.test_id, test_specifications.aircraft_engine, set_type, run_num)
 
 # Now we can update the YAML base file to call the new met files
-def generate_yaml_file(test_num, set_type, run_num):
+def generate_yaml_file(test_id, aircraft_engine, set_type, run_num):
+    test_num = test_id.split("_")[1]  # Extract the test number from the test ID
     # Define source and destination paths
-    source_path = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/BASE_APCEMM_input.yaml"  # Source YAML file
-    destination_dir = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/inputs/{}".format(test_num, set_type)  # Target directory
+    source_path = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/YAML_files/{}_APCEMM_input.yaml".format(aircraft_engine)  # Source YAML file
+    destination_dir = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/test_{}/inputs/{}".format(test_num, set_type)  # Target directory
     destination_path = os.path.join(destination_dir, "APCEMM_input_run_{}.yaml".format(run_num))
 
     # Copy the YAML file to the new directory
@@ -764,13 +827,334 @@ def generate_yaml_file(test_num, set_type, run_num):
         data = yaml.safe_load(file)  # Load YAML into a Python dictionary
 
     # Modify the YAML content
-    data["SIMULATION MENU"]["OUTPUT SUBMENU"]["Output folder (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/outputs/{}/test_{}_run_{}".format(test_num, set_type, test_num, run_num)
+    data["SIMULATION MENU"]["OUTPUT SUBMENU"]["Output folder (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/test_{}/outputs/{}/test_{}_run_{}".format(test_num, set_type, test_num, run_num)
 
     if set_type == "training":
-        data["METEOROLOGY MENU"]["METEOROLOGICAL INPUT SUBMENU"]["Met input file path (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/inputs/{}/APCEMM_met_{}.nc".format(test_num, set_type, run_num)
+        data["METEOROLOGY MENU"]["METEOROLOGICAL INPUT SUBMENU"]["Met input file path (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/test_{}/inputs/{}/APCEMM_met_{}.nc".format(test_num, set_type, run_num)
     else:
-        data["METEOROLOGY MENU"]["METEOROLOGICAL INPUT SUBMENU"]["Met input file path (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_training_sets/test_{}/inputs/{}/APCEMM_met_validation_{}.nc".format(test_num, set_type, run_num)
+        data["METEOROLOGY MENU"]["METEOROLOGICAL INPUT SUBMENU"]["Met input file path (string)"] = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/test_{}/inputs/{}/APCEMM_met_validation_{}.nc".format(test_num, set_type, run_num)
 
     # Write the modified YAML back to the file
     with open(destination_path, "w") as file:
         yaml.dump(data, file, default_flow_style=False, indent=4)
+
+############################################################################################################################################################
+# Part 3b:  Save APCEMM input and output variables to a PCE readable format
+
+class apcemm_data_struct:
+    def __init__(self, t, ds_t, int_OD, RHi):
+        self.t = t
+        self.ds_t = ds_t
+        self.int_OD = int_OD
+        self.RHi = RHi
+    
+def read_apcemm_data(directory):
+    t_mins = []
+    ds_t = []
+    int_OD = []
+    RHi = []
+
+    for file in sorted(os.listdir(directory)):
+        if(file.startswith('ts_aerosol') and file.endswith('.nc')):
+            file_path = os.path.join(directory,file)
+            ds = xr.open_dataset(file_path, engine = "netcdf4", decode_times = False)
+            ds_t.append(ds)
+            tokens = file_path.split('.')
+            mins = int(tokens[-2][-2:])
+            hrs = int(tokens[-2][-4:-2])
+            t_mins.append(hrs*60 + mins)
+            int_OD.append(ds["intOD"])
+            RHi.append(ds["RHi"])
+
+    return apcemm_data_struct(t_mins, ds_t, int_OD, RHi)
+
+def create_sample_matrix(test_specifications, set_type): # NEED TO UPDATE WITH MLD AND TIME DEPENDENT SCALING
+    # Define constants
+    test_id = test_specifications.test_id
+    num_runs = test_specifications.training_runs if set_type == "training" else test_specifications.validation_runs
+    IC_mean_amplitude_rhi = test_specifications.IC_mean_amplitude_rhi
+    sample_arrays = []
+
+    for i in range(1, num_runs+1): # For test runs num_runs
+        if set_type == "validation": # If you are processing a validation set
+            apcemm_data = read_apcemm_data(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/outputs/validation/{test_id}_run_{i}')
+            input_RHi_ds = xr.open_dataset(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/inputs/validation/APCEMM_met_validation_{i}.nc')
+        else: # If you are processing a training set
+            apcemm_data = read_apcemm_data(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/outputs/training/{test_id}_run_{i}')
+            input_RHi_ds = xr.open_dataset(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/inputs/training/APCEMM_met_{i}.nc')
+
+        int_OD = apcemm_data.int_OD
+        recorded_timesteps = len(int_OD)
+
+        # Normalizing outputs to a 12 hour timeframe
+        if recorded_timesteps == 0: # Ignore any runs where a contrail does not form
+            continue
+        elif recorded_timesteps > 73: # Truncate to 73 timesteps if contrail persists longer than 12 hours
+            current_sample_output = np.array(int_OD)[:73].reshape(1, 73)[0] # 1 row, 73 columns
+        elif recorded_timesteps < 73: # Pad with zeros to reach 73 timesteps
+            current_sample_output = np.pad(np.array(int_OD).reshape(1, recorded_timesteps)[0], (0, 73 - recorded_timesteps), 'constant', constant_values = 0)
+
+        # Define your input_RHi array (length 24 --> 24 hours in original met file)
+        input_RHi = input_RHi_ds['relative_humidity_ice'][98].values # RHi values for times 0-24 hours at pressure level index 98. 
+
+        # Expand input_RHi to match the timestamps output by APCEMM. APCEMM is run for 12 hours at 10-minute intervals. The met file is for 24 hours at 1-hour intervals.
+        # 1 hour is 6 10-minute intervals, so we repeat each RHi value 6 times to match met input to the APCEMM output.
+        expanded_input_RHi = []
+        expanded_input_RHi.append(input_RHi[0]) # Count the zeroth timestep as a 7th repeat
+        repeated_input_RHi = np.repeat(input_RHi[0:12], 6) # Look only at the first 12 hours of the met file. Repeat each element 6 times: [100 110 105] --> [100 100 100 100 100 100 110 110 110 110 110 110 105 105 105 105 105 105]
+        expanded_input_RHi.extend(repeated_input_RHi)
+        normalized_input_RHi = (np.array(expanded_input_RHi) - IC_mean_amplitude_rhi) # Shift the mean back to 0 for PCE to parse
+        current_sample_input = normalized_input_RHi.reshape(1,73)[0] # Transform into a row vector for stacking
+
+        # Stacking the input and output arrays
+        stacked = np.column_stack((current_sample_input, current_sample_output)) # Shape: (73, 2) --> (column, depth) --> (timesteps, 1 input 1 output) INPUTS: (:,0), OUTPUTS: (:,1)
+        sample_arrays.append(stacked)
+        input_RHi_ds.close()
+
+    # This matrix will be used for training the machine learning model, it contains input RHi and output int_OD. In The future there will be multiple input variables.
+    sample_matrix = np.array(sample_arrays) # Shape: (num_runs, 73, 2) --> (depth, row, column) --> (number of datasets to train PCE, timesteps, 1 input 1 output) INPUTS: (:,:,0), OUTPUTS: (:,:,1)
+    # Transpose the matrix to match the expected input shape of the machine learning model
+    sample_matrix = np.transpose(sample_matrix, (2, 0, 1)) # Shape: (2, num_runs, 73) --> (depth, row, column) --> (1 input 1 output, number of datasets to train PCE, timesteps) INPUTS: (0,:,:), OUTPUTS: (1,:,:)
+
+    # Save the training_sample_matrix to a .npy file
+    np.save('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/{}/{}_sample_matrix.npy'.format(test_id, set_type, set_type), sample_matrix)
+
+    print(f"{set_type} sample matrix created and saved successfully.")
+
+#############################################################################################################################################################
+# Part 4/5/6: Create and validate the PCE model
+from numpy.matlib import repmat
+
+def totalOrderMultiIndices(m, p):
+    """
+    Returns a matrix containing all multi-indices of size m of total order p
+    (implementation due to prior course member)
+
+    Parameters
+    ----------
+    m : int 
+        Number of uncertain variables
+    p : int
+        Maximum total degree (sum of degrees across a multiindex)
+
+    Returns
+    -------
+    np.array
+        Matrix containing multi-indices on rows.
+
+    """
+    Mk = np.zeros((1, m))
+    M = Mk
+    for k in range(p):
+        Mk = repmat(Mk, m, 1) + np.kron(np.eye(m), np.ones((Mk.shape[0], 1)))
+        Mk = np.unique(Mk, axis=0)
+        M = np.vstack((M, Mk))
+    return M.astype(int)
+
+"""
+psi = hermitePoly(x, degree)
+Evaluates hermite polynomials up to degree `degree` on all points x
+
+Arguments:
+    x: points to evaluate at
+    degree: highest degree to evaluate to
+
+Returns
+    psi: (degree+1,length(x)) Evaluate degree+1 hermite polynomials on x
+"""
+def hermitePoly(x, degree):
+    c = np.identity(degree+1)
+    psi = np.polynomial.hermite_e.hermeval(x, c)
+    return psi
+
+
+### Create and Validate PCE ###
+def create_PCE(test_specifications, sample_type:str):
+    training_runs = test_specifications.training_runs if sample_type == "training" else test_specifications.validation_runs
+
+    print(f"Creating PCE for {sample_type} samples with {training_runs} training runs.")
+    c, alpha_set = compute_c(sample_type, test_specifications)
+    return c, alpha_set
+
+def predicted_novel_solutions(c, alpha_set, novel_runs): # Novel inputs to PCE from online samples
+    sample_type = "novel"
+    multiindices = alpha_set.shape[0]
+    He_array = np.zeros((multiindices, novel_runs))
+    samples_matrix = get_samples_matrix_online(novel_runs, sample_type)
+
+    for i in tqdm.tqdm(range(novel_runs)): # for each MC run
+        for j in range(multiindices): # for each coefficient
+            current_alpha = alpha_set[j, :] # look at one row at a time for all alpha describing a single coefficient
+            samples_matrix_He = samples_matrix[i, :]
+            He_array[j, i] = compute_He(samples_matrix_He, current_alpha)
+
+    # Solve for the Least Squares solution
+    predicted_output = c.T @ He_array
+    return predicted_output.T
+
+def true_training_solutions(sample_type:str, test_id):
+    true_output = func_eval_offline(sample_type, test_id).T # TRUE APCEMM SOLUTIONS [Integrated VOD] with shape: (number of datasets to train PCE, timesteps)
+    return true_output
+
+### NEED TO UPDATE OFFLINE FUNCTIONS TO DISTINGUISH VALIDATION AND TRAINING PATHS
+def predicted_validation_solutions(c, alpha_set, test_specifications): # Validation inputs to PCE from offline pre-computed validation set
+    validation_runs = test_specifications.validation_runs
+    test_id = test_specifications.test_id
+    sample_type = "validation"
+    multiindices = alpha_set.shape[0]
+    He_array = np.zeros((multiindices, validation_runs))
+    samples_matrix = get_samples_matrix_offline(sample_type, test_id)
+
+    for i in tqdm.tqdm(range(validation_runs)): # for each MC run
+        
+        for j in range(multiindices): # for each coefficient
+            current_alpha = alpha_set[j, :] # look at one row at a time for all alpha describing a single coefficient
+            samples_matrix_He = samples_matrix[i, :]
+            He_array[j, i] = compute_He(samples_matrix_He, current_alpha)
+
+    # Solve for the Least Squares solution
+    predicted_output = (c.T @ He_array).T
+
+    return predicted_output
+
+def true_validation_solutions(sample_type:str, test_id):
+    true_output = func_eval_offline(sample_type, test_id).T # TRUE APCEMM SOLUTIONS [Integrated VOD] with shape: (number of datasets to train PCE, timesteps)
+    return true_output
+
+### Internal Functions ###
+def compute_c(sample_type:str, test_specifications):
+    test_id = test_specifications.test_id
+    training_runs = test_specifications.training_runs if sample_type == "training" else test_specifications.validation_runs
+
+    c_samples_matrix = get_samples_matrix_offline(sample_type, test_id) # (timesteps, number of datasets to train PCE)
+    alpha_set = get_alpha_set(test_specifications.polynomial_degree, test_specifications.maximum_degree) # (number of datasets to train PCE, timesteps)
+    c_multiindices = alpha_set.shape[0]
+
+    V = np.zeros((training_runs, c_multiindices)) # Vandermonde Matrix: Training Runs x Degree of Polynomial
+
+    for i in tqdm.tqdm(range(training_runs)):
+        for j in range(c_multiindices):
+            current_alpha = alpha_set[j, :]
+            c_samples_matrix_He = c_samples_matrix[:, i]
+            V[i, j] = compute_He(c_samples_matrix_He, current_alpha) / np.sqrt(np.product(sc.special.factorial(current_alpha)))
+
+    f = solve_u(sample_type, test_id).T # (number of datasets to train PCE, timesteps)
+    
+    c, residuals, rank, singular_values = np.linalg.lstsq(V.T @ V, V.T @ f)
+    
+    return c, alpha_set
+
+def func_eval_offline(sample_type:str, test_id):
+
+    if sample_type == "training":
+        training_samples_matrix_offline =np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_id)) # Import APCEMM training data
+
+        training_samples_matrix_offline_OUTPUTS = training_samples_matrix_offline[1,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
+        # Transpose the rows and columns to accomodate later calculations
+        training_samples_matrix_offline_OUTPUTS = training_samples_matrix_offline_OUTPUTS.T # (timesteps, number of datasets to train PCE)
+        return training_samples_matrix_offline_OUTPUTS
+    
+    elif sample_type == "validation":
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_id)) # Import APCEMM validation data
+
+        validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline[1,:,:]
+        validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline_OUTPUTS.T
+        return validation_samples_matrix_offline_OUTPUTS
+    
+    else: 
+        print("Invalid sample type. Please enter 'training' or 'validation'.")
+        return None
+
+
+def get_samples_matrix_offline(sample_type:str, test_id):
+
+    if sample_type == "training":
+        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_id)) # Import APCEMM training data
+
+        training_samples_matrix_offline_INPUTS = training_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
+        training_samples_matrix_offline_INPUTS = training_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets to train PCE)
+        print(training_samples_matrix_offline_INPUTS.shape)
+        return training_samples_matrix_offline_INPUTS
+    
+    elif sample_type == "validation":
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_id)) # Import APCEMM validation data
+
+        validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets, timesteps)
+        validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets)
+        return validation_samples_matrix_offline_INPUTS
+
+    else: 
+        print("Invalid sample type. Please enter 'training' or 'validation'.")
+        return None
+    
+def get_samples_matrix_online(runs):
+    return np.hstack((np.random.normal(mean_IC_norm, std_IC, size=(runs, 1)), np.random.normal(mean_norm, std_norm, size=(runs, timesteps - 1))))
+
+def get_alpha_set(poly_dim, max_deg):
+    return totalOrderMultiIndices(poly_dim, max_deg)
+
+def compute_He(Z, alpha):
+    res = 1
+    for alpha_i, z_i in zip(alpha, Z):
+        res = res * HermiteE.basis(deg = alpha_i)(z_i)
+    return res
+
+def solve_u(sample_type:str, test_id):
+    u_sol = func_eval_offline(sample_type, test_id) # (timesteps, number of datasets to train PCE)
+    return u_sol
+
+def smooth_artifacts(offline_samples_matrix):
+
+    y = offline_samples_matrix # Extract the output for the i-th training run
+    # Step 1: Find large jumps (spikes)
+    diff_y = np.abs(np.diff(y))
+    threshold = 500  # You can adjust this
+    spike_indices = np.where(diff_y > threshold)[0]
+    # Step 2: Mask the spike region
+    mask = np.ones_like(y, dtype=bool)
+    for idx in spike_indices:
+        mask[max(0, idx-1):min(len(y), idx+5)] = False  # mask +- some points
+    # Step 3: Interpolate to fill spike
+    x = np.arange(len(y))
+    y_cleaned = np.copy(y)
+    y_cleaned[~mask] = np.interp(x[~mask], x[mask], y[mask])
+    
+    return y_cleaned
+
+#############################################################################################################################################################
+# Part 7: Compute sensitivity indices
+
+def compute_total_effect_sensitivity_indices(coefficients, num_variables):
+    """
+    Compute total effect sensitivity indices for each uncertain variable.
+
+    Parameters:
+    coefficients (numpy.ndarray): Simulated coefficients, rows represent different basis terms, columns represent timesteps.
+    num_variables (int): Number of uncertain variables.
+
+    Returns:
+    dict: Dictionary containing total effect sensitivity indices for each variable.
+    """
+    # Number of basis terms
+    num_basis = coefficients.shape[0]
+
+    # Compute total variance for each timestep (sum of squared coefficients excluding the constant term)
+    total_variance = np.sum(coefficients[1:, :] ** 2, axis=0)  # Sum across basis terms, excluding the first row
+
+    # Dictionary to store total effect sensitivity indices
+    S_T = {}
+
+    # Assuming that each variable's basis functions are in consecutive blocks, 
+    # we will group basis terms by the uncertain variables they correspond to.
+    for var_idx in range(num_variables):
+        # For each uncertain variable, sum over the basis terms that correspond to that variable.
+        # Assuming here that each variable's terms are grouped consecutively in the matrix:
+        start_idx = var_idx * (num_basis // num_variables)  # Starting index for this variable's terms
+        end_idx = start_idx + (num_basis // num_variables)  # Ending index for this variable's terms
+
+        # Sum over all terms that involve this variable (main effect + interactions)
+        variance_contribution = np.sum(coefficients[start_idx:end_idx, :] ** 2, axis=0)  # Sum over terms for this variable
+        S_T[f"S_T_{var_idx}"] = variance_contribution / total_variance
+
+    return S_T
+

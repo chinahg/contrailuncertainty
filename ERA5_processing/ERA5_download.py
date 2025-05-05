@@ -192,7 +192,7 @@ def request_ERA5_data(period_type, csv_path, entire_file, start_file, end_file):
 
 # Import the pipeline module variables dynamically
 import importlib.util
-file_path = "/home/chinahg/GCresearch/contrailuncertainty/pipeline.py"
+file_path = "/home/chinahg/GCresearch/contrailuncertainty/start_here/pipeline.py"
 
 # Load the module dynamically
 spec = importlib.util.spec_from_file_location("pipeline", file_path)
