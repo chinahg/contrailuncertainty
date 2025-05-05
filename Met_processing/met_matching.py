@@ -7,26 +7,29 @@ import netCDF4 as nc
 import os
 from datetime import datetime, timedelta
 import tqdm
+import csv
 import importlib.util
+
 # Import functions from the pipeline_fxn_lib.py script
 function_library_path = "/home/chinahg/GCresearch/contrailuncertainty/start_here/pipeline_fxn_lib.py"
-spec = importlib.util.spec_from_file_location("fxn", function_library_path)
-fxn = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fxn)
+spec = importlib.util.spec_from_file_location("lib", function_library_path)
+lib = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(lib)
 
-# Import the user defined variables from the preprocess_pipeline.py script
-import_path = "/home/chinahg/GCresearch/contrailuncertainty/preprocess_pipeline.py"
-pipeline = importlib.util.spec_from_file_location("preprocess_pipeline", import_path)
-preprocess_pipeline = importlib.util.module_from_spec(pipeline)
-pipeline.loader.exec_module(preprocess_pipeline)
+# Import the saved variables required from the pipeline.py script
+args_file_path = "/home/chinahg/GCresearch/contrailuncertainty/Met_processing/met_processing_args.csv"
+with open(args_file_path, mode='r') as file:
+    reader = csv.DictReader(file)
+    args = {row['variable']: eval(row['value']) for row in reader}
 
-# Import only the specific variables you need
-start_file = getattr(preprocess_pipeline, 'start_file', None)  # Fallback to None if not found
-end_file = getattr(preprocess_pipeline, 'end_file', None)
-era5_file_paths = getattr(preprocess_pipeline, 'era5_file_paths', None)
-gruan_file_paths = getattr(preprocess_pipeline, 'gruan_file_paths', None)
-batch = getattr(preprocess_pipeline, 'batch', None)
-########################################################################################################################################
+# Assign variables
+start_file = args['start_index']
+end_file = args['end_index']
+era5_file_paths = args['era5_file_paths']
+gruan_file_paths = args['gruan_file_paths']
+batch = args['batch']
+
+###############################################################################################
 
 ### Begin main script
 print(f"Processing files from {start_file} to {end_file}...")
@@ -59,32 +62,32 @@ for j in tqdm.tqdm(range(start_file, end_file)):  # Iterate through the dates
 
     G_datetime = [base_time + timedelta(seconds=float(sec)) for sec in G_data.variables['time'][:]]  # Convert the time variable from seconds since base_time to datetime objects
     G_site = os.path.basename(G_file_path).split('_')[0].split('-')[0]
-    G_lat = fxn.fill_nan_with_next(G_data.variables['lat'][:])
-    G_lon = fxn.fill_nan_with_next(G_data.variables['lon'][:])
-    G_alt = fxn.fill_nan_with_next(G_data.variables['alt'][:])
-    G_T = fxn.fill_nan_with_next(G_data.variables['temp'][:])
+    G_lat = lib.fill_nan_with_next(G_data.variables['lat'][:])
+    G_lon = lib.fill_nan_with_next(G_data.variables['lon'][:])
+    G_alt = lib.fill_nan_with_next(G_data.variables['alt'][:])
+    G_T = lib.fill_nan_with_next(G_data.variables['temp'][:])
     G_RHi = G_data.variables['rh_i'][:]
-    G_pres = fxn.fill_nan_with_next(G_data.variables['press'][:])
-    G_MLD = fxn.calculate_MLD(G_alt, G_pres, G_RHi, G_T, G_lat, G_lon, "GRUAN")
+    G_pres = lib.fill_nan_with_next(G_data.variables['press'][:])
+    G_MLD = lib.calculate_MLD(G_alt, G_pres, G_RHi, G_T, G_lat, G_lon, "GRUAN")
 
-    E_datetime = E_data.variables['time'][:].values
     E_pres = np.array(E_data.variables['isobaricInhPa'][:].values)
     E_T = np.array(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['t'])
-    E_alt = np.array(fxn.press2alt(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['isobaricInhPa']))
+    E_alt = np.array(lib.press2alt(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['isobaricInhPa']))
     E_lat = float(E_data.latitude.sel(latitude=G_lat[0], method='nearest').values)
     E_lon = float(E_data.longitude.sel(longitude=G_lon[0], method='nearest').values)
     E_RHi = np.array(E_data.sel(latitude=G_lat[0], longitude=G_lon[0], time=G_datetime[0], method='nearest')['RH_i'])
+    E_datetime = np.array(E_data.sel(latitude=E_lat, longitude=E_lon, time=G_datetime[0], method='nearest').time.values)
 
     # Regrid the E_RHi data to match the G_alt data dimension 
     indexer = len(G_alt)
     for i in range(indexer):
-        E_RHi_regrid.append(np.array(E_data.sel(latitude=G_lat[i], longitude=G_lon[i], isobaricInhPa=fxn.alt2press(G_alt[i]), time=G_datetime[i], method='nearest')['RH_i']))
+        E_RHi_regrid.append(np.array(E_data.sel(latitude=G_lat[i], longitude=G_lon[i], isobaricInhPa=lib.alt2press(G_alt[i]), time=G_datetime[i], method='nearest')['RH_i']))
     E_RHi_regrid = np.array(E_RHi_regrid)
 
     # Linearly diffuse the data as a user would when using the ERA5 data
-    E_RHi_diffused = fxn.linear_diffusion(E_RHi_regrid)
+    E_RHi_diffused = lib.linear_diffusion(E_RHi_regrid)
 
-    E_MLD = np.array(fxn.calculate_MLD(E_alt, E_pres, E_RHi, E_T, E_lat, E_lon, "ERA5"))
+    E_MLD = np.array(lib.calculate_MLD(E_alt, E_pres, E_RHi, E_T, E_lat, E_lon, "ERA5"))
     E_alt = np.array(np.unique(E_alt))
 
     # Create a dictionary for the current data
@@ -138,5 +141,6 @@ else:
 df.set_index(index, inplace=True)
 
 # Save the DataFrame to a parquet file
-df.to_parquet('/home/chinahg/GCresearch/contrailuncertainty/Met_processing/final_met_data_'+str(batch)+'.parquet')
+base_save_dir = '/home/chinahg/GCresearch/contrailuncertainty/Met_processing/'
+df.to_parquet(base_save_dir+'final_met_data_'+str(batch)+'.parquet')
 print("Data saved to final_met_data.parquet.")

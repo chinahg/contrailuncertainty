@@ -11,3 +11,4 @@ status_case*
 AEIC_2022_30Nto60N/
 OAG2022.csv
 test_*/
+*.parquet

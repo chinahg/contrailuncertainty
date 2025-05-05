@@ -12,4 +12,4 @@
 #SBATCH --mem=5000MB
 #####################################
 
-python /home/chinahg/GCresearch/contrailuncertainty/Met_processing/met_matching.py
+/home/chinahg/.conda/envs/contrails/bin/python /home/chinahg/GCresearch/contrailuncertainty/Met_processing/met_matching.py
