@@ -1047,7 +1047,7 @@ def compute_c(sample_type:str, test_specifications):
 def func_eval_offline(sample_type:str, test_id):
 
     if sample_type == "training":
-        training_samples_matrix_offline =np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_id)) # Import APCEMM training data
+        training_samples_matrix_offline =np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
 
         training_samples_matrix_offline_OUTPUTS = training_samples_matrix_offline[1,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
         # Transpose the rows and columns to accomodate later calculations
@@ -1055,7 +1055,7 @@ def func_eval_offline(sample_type:str, test_id):
         return training_samples_matrix_offline_OUTPUTS
     
     elif sample_type == "validation":
-        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_id)) # Import APCEMM validation data
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
 
         validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline[1,:,:]
         validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline_OUTPUTS.T
@@ -1069,7 +1069,7 @@ def func_eval_offline(sample_type:str, test_id):
 def get_samples_matrix_offline(sample_type:str, test_id):
 
     if sample_type == "training":
-        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_id)) # Import APCEMM training data
+        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
 
         training_samples_matrix_offline_INPUTS = training_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
         training_samples_matrix_offline_INPUTS = training_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets to train PCE)
@@ -1077,7 +1077,7 @@ def get_samples_matrix_offline(sample_type:str, test_id):
         return training_samples_matrix_offline_INPUTS
     
     elif sample_type == "validation":
-        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_id)) # Import APCEMM validation data
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
 
         validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets, timesteps)
         validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets)

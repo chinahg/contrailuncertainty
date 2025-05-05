@@ -331,15 +331,27 @@ timesteps = 73 # Number of samples per APCEMM run (this is the number of timeste
 
 # Load in APCEMM inputs and outputs
 # APCEMM inputs that were trained on, and we also have the True solution for
-training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM training data
+raw_training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM training data
 # APCEMM inputs that were not trained on, and we also have the True solution for
-validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM validation data
+raw_validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM validation data
 
 # APCEMM has issues with artifacts, smooth those out as pre-processing
+clean_training_samples_matrix_offline = np.copy(raw_training_samples_matrix_offline)
+clean_validation_samples_matrix_offline = np.copy(raw_validation_samples_matrix_offline)
+
 for i in range(test_specifications.training_runs):
-    training_samples_matrix_offline[1, i, :] = lib.smooth_artifacts(training_samples_matrix_offline[1,i,:])
+    clean_training_samples_matrix_offline[1, i, :] = lib.smooth_artifacts(raw_training_samples_matrix_offline[1,i,:])
 for i in range(test_specifications.validation_runs):
-    validation_samples_matrix_offline[1, i, :] = lib.smooth_artifacts(validation_samples_matrix_offline[1,i,:])
+    clean_validation_samples_matrix_offline[1, i, :] = lib.smooth_artifacts(raw_validation_samples_matrix_offline[1,i,:])
+
+# Save the smoothed training and validation sample matrices
+# Specify the directory to save the results
+results_dir = f"/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{test_specifications.test_id}"
+if not os.path.exists(results_dir):
+    os.makedirs(results_dir, exist_ok=False)
+    
+np.save(f"{results_dir}/training_samples_matrix_offline_cleaned.npy", clean_training_samples_matrix_offline)
+np.save(f"{results_dir}/validation_samples_matrix_offline_cleaned.npy", clean_validation_samples_matrix_offline)
 
 # Create the PCE with the training data
 coefficients, alpha = lib.create_PCE(test_specifications, "training")
@@ -357,10 +369,6 @@ print("PCE validation tests ran successfully!")
 #################################################################################################################################################
 ### Pipeline Step 6: Save the PCE model and validation results
 
-results_dir = f"/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{test_specifications.test_id}"
-if not os.path.exists(results_dir):
-    os.makedirs(results_dir, exist_ok=False)
-
 # Save the PCE coefficients and alpha set
 np.save(f"{results_dir}/PCE_coefficients.npy", coefficients)
 np.save(f"{results_dir}/PCE_alpha_set.npy", alpha)
@@ -371,10 +379,6 @@ np.save(f"{results_dir}/true_validation_solutions.npy", lib.true_validation_solu
 
 # Save the training solutions
 np.save(f"{results_dir}/true_training_solutions.npy", lib.true_training_solutions("training", test_specifications.test_id))
-
-# Save the smoothed training and validation sample matrices
-np.save(f"{results_dir}/training_samples_matrix_offline_cleaned.npy", training_samples_matrix_offline)
-np.save(f"{results_dir}/validation_samples_matrix_offline_cleaned.npy", validation_samples_matrix_offline)
 
 #################################################################################################################################################
 ### Pipeline Step 7: Sobol Sensitivity Analysis
