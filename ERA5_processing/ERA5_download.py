@@ -5,6 +5,12 @@ import sys
 import csv
 import cdsapi
 from zarr.errors import GroupNotFoundError
+import yaml
+
+# Import functions from the pipeline_fxn_lib.py script
+import sys
+sys.path.append('/home/chinahg/GCresearch/contrailuncertainty/start_here/')
+import pipeline_fxn_lib as lib
 
 # Downloading ERA5 data
 ### FUNCTION LIBRARY ###
@@ -154,56 +160,32 @@ def download_ERA5_data(time, save_path, variables=ERA5_VARIABLES,
     
     c.retrieve("reanalysis-era5-pressure-levels", CDSAPI_settings, save_path)
 
-def request_ERA5_data(period_type, csv_path, entire_file, start_file, end_file):
-    if period_type == "continuous":
-        # For a continous time period, download ERA5 data
-        # Call function of choice
-        sdate = dt.datetime(2016, 1, 12) # Start date # EDITABLE
-        edate = dt.datetime(2016, 1, 12) # End date # EDITABLE
-        delta = dt.timedelta(days=1) # Timestep
+def request_ERA5_data(csv_path, start_index, end_index):
 
-        day = sdate
+    # For a custom time period, download ERA5 data
+    # Read the CSV file containing dates to download
+    files2download = read_csv_file(csv_path)
 
-        while day <= edate:
-            save_path = "/home/chinahg/GCresearch/ERA5_downloads/" + day.strftime("%Y/%Y_%m_%d.nc")
-            download_ERA5_data(day, save_path)
-            # increment start date by timedelta
-            day += delta
+    for i in range(start_index, end_index):
+        date_str = files2download[i]
+        year = int(date_str[:4])
+        month = int(date_str[4:6])
+        day = int(date_str[6:8])
+        date = dt.datetime(year, month, day)
+        save_path = "/home/chinahg/GCresearch/ERA5_downloads/" + str(year) + "/" + date.strftime("%Y_%m_%d.nc")
+        download_ERA5_data(date, save_path)
 
-    elif period_type == "custom":
-        # For a custom time period, download ERA5 data
-        # Call the function to read the CSV file
-        files2download = read_csv_file(csv_path)
+#####################################################################################################################
 
-        if entire_file == True:
-            start_file = 0
-            end_file = len(files2download)
+# Import the job download details
+download_details_path = sys.argv[1]
+# Read in the variable associated with the download details
+with open(download_details_path, "r") as f:
+    details_dict = yaml.safe_load(f)
 
-        for i in range(start_file, end_file):
-            date_str = files2download[i]
-            year = int(date_str[:4])
-            month = int(date_str[4:6])
-            day = int(date_str[6:8])
-            date = dt.datetime(year, month, day)
-            save_path = "/home/chinahg/GCresearch/ERA5_downloads/" + str(year) + "/" + date.strftime("%Y_%m_%d.nc")
-            download_ERA5_data(date, save_path)
-    else:
-        raise ValueError("Period type should be either 'continuous' or 'custom'")
+download_details = lib.download_details(**details_dict)
+files2download_path = download_details.files2download_path
+start_index = download_details.start_index
+end_index = download_details.end_index
 
-# Import the pipeline module variables dynamically
-import importlib.util
-file_path = "/home/chinahg/GCresearch/contrailuncertainty/start_here/pipeline.py"
-
-# Load the module dynamically
-spec = importlib.util.spec_from_file_location("pipeline", file_path)
-pipeline = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(pipeline)
-
-# Import only the specific variables you need
-period_type = getattr(pipeline, 'period_type', None)  # Fallback to None if not found
-entire_file = getattr(pipeline, 'entire_file', None)
-start_index = getattr(pipeline, 'start_index', None)
-end_index = getattr(pipeline, 'end_index', None)
-csv_path = getattr(pipeline, 'csv_path', None)
-
-request_ERA5_data(period_type, csv_path, entire_file, start_index, end_index)
+request_ERA5_data(files2download_path, start_index, end_index)

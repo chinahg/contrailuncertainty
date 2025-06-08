@@ -10,6 +10,6 @@ output_process integrate
 atmosphere_file US-standard
 ic_habit plate
 ic_properties yang
-ic_file 1D /home/chinahg/GCresearch/contrailuncertainty/LRT/ice.in
-ic_modify tau set 0.28473455241469786
+ic_file 1D ice.in
+ic_modify tau set 0.02519743384911387
 quiet

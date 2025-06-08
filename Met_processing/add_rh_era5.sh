@@ -1,7 +1,7 @@
 #!/bin/bash                                   
 
-#SBATCH --time=8:00:00
-#SBATCH --job-name="Met Processing Batch"
+#SBATCH --time=72:00:00
+#SBATCH --job-name="Add RH Batches"
 #SBATCH --mail-type=BEGIN,END
 #SBATCH -o /home/chinahg/GCresearch/contrailuncertainty/Met_processing/slurm_outs/slurm-%j-out
 #xSBATCH -e slurm-%j.err
@@ -12,4 +12,4 @@
 #SBATCH --mem=5000MB
 #####################################
 
-/home/chinahg/.conda/envs/contrails/bin/python /home/chinahg/GCresearch/contrailuncertainty/Met_processing/met_matching.py $ARG1
+/home/chinahg/.conda/envs/contrails/bin/python /home/chinahg/GCresearch/contrailuncertainty/Met_processing/add_RHi_RHw_ERA5.py $ARG1 $ARG2

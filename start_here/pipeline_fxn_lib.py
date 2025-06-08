@@ -12,14 +12,242 @@ import shutil
 import yaml
 from numpy.polynomial.hermite_e import HermiteE
 import scipy as sc
+import subprocess
+import time
+from dataclasses import dataclass
+from scipy.stats import gaussian_kde
+import json
+from numpy.matlib import repmat
 
 ##############################################################################################################################################
-
 # Function library for pipeline
-############################################################################################################################################################
+################################################################################################################################################
+# General Functions: Not Step Specific
+
+def submit_job_and_get_id(script_path, job_type, export_args):
+    # Submit the job using sbatch and capture the output
+    if job_type == "no_args":
+        result = subprocess.run(
+            ["sbatch", script_path],
+            capture_output=True,
+            text=True
+        )
+    elif job_type == "has_args":
+        result = subprocess.run(
+        ["sbatch", "--export=" + export_args, script_path],
+        capture_output=True,
+        text=True
+    )
+
+    # Extract the job ID from the output
+    output = result.stdout.strip()
+    job_id = output.split()[-1]  # Get the last word from the output
+    print(f"Submitted job with ID: {job_id}")
+    return job_id
+
+def wait_for_specific_jobs(job_ids):
+    job_ids_str = ",".join(job_ids)
+    while True:
+        result = subprocess.run(
+            ["squeue", "-j", job_ids_str],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            print(f"Error from squeue: {result.stderr}")
+            break
+        # Check if only header line is present
+        if len(result.stdout.strip().splitlines()) <= 1:
+            print("All specified jobs are completed!")
+            break
+        else:
+            print("Waiting for jobs to complete...")
+            time.sleep(60) #  # Wait for 1 minute before checking again
+
+def convert_to_datetime(year, month, day, time):
+    """
+    Convert year, month, day, and time to a numpy datetime64 object.
+
+    Parameters
+    ----------
+    year : int
+        Year.
+    month : int
+        Month.
+    day : int
+        Day.
+    time : str
+        Time in the format 'HH:MM:SS'.
+
+    Returns
+    -------
+    np.datetime64
+        Numpy datetime64 object.
+    """
+    date_str = f"{year}-{month}-{day}T{time}"
+    return np.datetime64(date_str)
+
+def compute_Psat_w(T):
+    """
+    Returns water liquid saturation pressure in Pascal.
+    Source: Sonntag (1994)
+
+    Parameters
+    ----------
+    T : float
+        Temperature in Kelvin
+
+    Returns
+    -------
+    float
+        H2O Liquid saturation pressure in Pascal
+    """
+    return 100.0 * np.exp(
+        -6096.9385 / T
+        + 16.635794
+        - 0.02711193 * T
+        + 1.673952e-5 * T**2
+        + 2.433502 * np.log(T)
+    )
+
+def compute_Psat_i(T):
+    """
+    Returns water solid saturation pressure in Pascal.
+    Source: Sonntag (1990)
+
+    Parameters
+    ----------
+    T : float
+        Temperature in Kelvin
+
+    Returns
+    -------
+    float
+        H2O solid saturation pressure in Pascal
+    """
+    return 100.0 * np.exp(
+        -6024.5282 / T
+        + 24.7219
+        + 0.010613868 * T
+        - 1.3198825e-5 * T**2
+        - 0.49382577 * np.log(T)
+    )
+
+def press2alt(pressure):
+    """
+    Convert pressure to altitude.
+
+    Parameters
+    ----------
+    pressure : Union[int, np.ndarray]
+        Pressure in Pascal.
+
+    Returns
+    -------
+    Union[float, np.ndarray]
+        Altitude in meters.
+    """
+    L = -6.5*10**-3
+    P0 = 101325
+    T0 = 288.15
+    R = 287.053
+    g = 9.81
+
+    altitudes = np.zeros_like(pressure)
+
+    if type(pressure)==int:
+        return (T0/L)*((pressure*100/P0)**(-R*L/g) -1)
+    else:
+        for i in range(len(pressure)):
+            altitudes[i] = (T0/L)*((pressure[i]*100/P0)**(-R*L/g) -1)
+
+        return altitudes
+
+def alt2press(altitude):
+    """
+    Convert altitude to pressure.
+
+    Parameters
+    ----------
+    altitude : Union[float, np.ndarray]
+        Altitude in meters.
+
+    Returns
+    -------
+    Union[int, np.ndarray]
+        Pressure in Pascal.
+    """
+    L = -6.5*10**-3
+    P0 = 101325
+    T0 = 288.15
+    R = 287.053
+    g = 9.81
+
+    if isinstance(altitude, (float, np.float32)):
+        return P0*(1 + L*altitude/T0)**(-g/(R*L))
+    else:
+        pressures = np.zeros_like(altitude)
+        for i in range(len(altitude)):
+            pressures[i] = P0*(1 + L*altitude[i]/T0)**(-g/(R*L))
+
+        return pressures
+    
+
+################################################################################################################################################
 # Part 1: Downloading and formatting GRUAN and ERA5 data
 
-def check_files(GRUAN_base_dir, years):
+def download_files(entire_file, files2download_path, files_per_batch, files2download):
+    ## Download ERA5 data correpsonding to the available GRUAN data
+    # Download the missing ERA5 files using slurm
+    job_ids = []  # Initialize an array to store job IDs
+    download_details_path = "/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/download_details.yaml"
+
+    if entire_file == True:
+        # Serialise and save the download job details to a yaml file
+        download_details_yaml = download_details(files2download_path, 0, len(files2download))
+        with open(download_details_path, "w") as f:
+            yaml.safe_dump(download_details_yaml.__dict__, f)
+
+        # Pass the download_details filepath to the bash script
+        export_args = f"ARG1={download_details_path}"
+
+        # Submit the job and get the job ID
+        job_ids.append(submit_job_and_get_id("/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/era5_download.sh", "has_args", export_args))
+    else:
+        groups = len(files2download) // files_per_batch + (1 if len(files2download) % files_per_batch != 0 else 0) # Number of groups to split the files into for slurm
+        for i in range(groups):
+            start_index = i * files_per_batch
+            end_index = start_index + files_per_batch
+            print(f"Submitting batch {i+1} with files from {start_index} to {end_index}")
+
+            if end_index > len(files2download):
+                end_index = len(files2download)
+
+            # Serialise and save the download job details to a yaml file
+            download_details_yaml = download_details(files2download_path, start_index, end_index)
+            with open(download_details_path, "w") as f:
+                yaml.safe_dump(download_details_yaml.__dict__, f)
+
+            # Pass the download_details filepath to the bash script
+            export_args = f"ARG1={download_details_path}"
+
+            # Submit the job and get the job ID
+            job_ids.append(submit_job_and_get_id("/home/chinahg/GCresearch/contrailuncertainty/ERA5_processing/era5_download.sh", "has_args", export_args))
+            time.sleep(15)  # Optional: wait a bit before submitting the next job
+
+    # Wait for the job to complete
+    wait_for_specific_jobs(job_ids)
+
+    complete_message = "Job(s) completed, continuing with the script!"
+    ### WAIT FOR THE JOB TO FINISH THEN CONTINUE
+    return complete_message
+
+@dataclass
+class download_details:
+    files2download_path: str
+    start_index: int
+    end_index: int
+
+def check_files(GRUAN_base_dir, years, generated_files_dir):
     # Get all GRUAN radiosonde files
     GRUAN_file_paths = []
     for year in years:
@@ -48,7 +276,7 @@ def check_files(GRUAN_base_dir, years):
     files2download.sort()
     files2download = [str(date).replace("_", "").replace(".nc", "") for date in files2download]
 
-    file2download_path = 'files2download.csv'
+    file2download_path = f'{generated_files_dir}/files2download.csv'
 
     # Open the file in write mode
     with open(file2download_path, 'w', newline='') as csvfile:
@@ -62,7 +290,7 @@ def check_files(GRUAN_base_dir, years):
     files2convert = list(set(files2convert))
     files2convert.sort()
 
-    files2convert_path = 'files2convert.csv'
+    files2convert_path = f'{generated_files_dir}/files2convert.csv'
 
     # Open the file in write mode
     with open(files2convert_path, 'w', newline='') as csvfile:
@@ -72,7 +300,7 @@ def check_files(GRUAN_base_dir, years):
         # Write the array to the CSV file
         writer.writerow(files2convert)
     
-    return files2convert, GRUAN_date_sites
+    return files2convert, files2download, GRUAN_date_sites
 
 def convert_files(data_dir, files2convert):
     # Convert unconverted GRIB files to netCDF
@@ -99,28 +327,6 @@ def convert_files(data_dir, files2convert):
             os.remove(path_grib)
             print(f"File '{path_grib}' deleted successfully.")
 
-def convert_to_datetime(year, month, day, time):
-    """
-    Convert year, month, day, and time to a numpy datetime64 object.
-
-    Parameters
-    ----------
-    year : int
-        Year.
-    month : int
-        Month.
-    day : int
-        Day.
-    time : str
-        Time in the format 'HH:MM:SS'.
-
-    Returns
-    -------
-    np.datetime64
-        Numpy datetime64 object.
-    """
-    date_str = f"{year}-{month}-{day}T{time}"
-    return np.datetime64(date_str)
 
 def process_GRUAN_filename(filepath):
     """
@@ -184,7 +390,6 @@ def match_files(GRUAN_date_sites):
     ERA5_name_only = []
     files2convert = []
     files2download = []
-    print("Matching GRUAN dates with ERA5 files...")
 
     ERA5_directory = '/home/chinahg/GCresearch/ERA5_downloads'
     
@@ -193,7 +398,7 @@ def match_files(GRUAN_date_sites):
         for file in files:
             ERA5_file_names.append(os.path.basename(os.path.join(root, file)))
 
-    for i in tqdm.tqdm(range(len(GRUAN_date_sites))):
+    for i in range(len(GRUAN_date_sites)):
         GRUAN_date_formatted = str(GRUAN_date_sites[i][1]).replace("-", "_")[:10]
         GRUAN_date_nc = GRUAN_date_formatted + '.nc'
         GRUAN_date_grib = GRUAN_date_formatted + '.grib'
@@ -210,15 +415,16 @@ def match_files(GRUAN_date_sites):
             files2download.append(GRUAN_date_formatted)  # Save filename to reference later when downloading files
     
     # Get rid of duplicates and sort
-    ERA5_file_names_matching = list(set(ERA5_name_only)) 
+    ERA5_file_names_matching = list(ERA5_name_only)
     ERA5_file_names_matching.sort()
 
     files2convert = list(set(files2convert))
     files2download = list(set(files2download))
 
-    print("Number of unconverted GRIB files: ", len(files2convert))
-    print("Number of files to download: ", len(files2download))
-    print("Number of matching files: ", len(ERA5_file_names_matching))
+    # print("Number of unconverted ERA5 GRIB files: ", len(files2convert))
+    # print("Number of ERA5 files to download: ", len(files2download))
+    # print("Number of GRUAN files: ", len(GRUAN_date_sites))
+    # print("Number of matching meteorological files: ", len(ERA5_file_names_matching))
     
     return ERA5_data_matching, ERA5_file_names_matching, files2convert, files2download
 
@@ -242,52 +448,6 @@ def get_coordinates(site_code):
     else:
         return None, None
 
-def compute_Psat_w(T):
-    """
-    Returns water liquid saturation pressure in Pascal.
-    Source: Sonntag (1994)
-
-    Parameters
-    ----------
-    T : float
-        Temperature in Kelvin
-
-    Returns
-    -------
-    float
-        H2O Liquid saturation pressure in Pascal
-    """
-    return 100.0 * np.exp(
-        -6096.9385 / T
-        + 16.635794
-        - 0.02711193 * T
-        + 1.673952e-5 * T**2
-        + 2.433502 * np.log(T)
-    )
-
-def compute_Psat_i(T):
-    """
-    Returns water solid saturation pressure in Pascal.
-    Source: Sonntag (1990)
-
-    Parameters
-    ----------
-    T : float
-        Temperature in Kelvin
-
-    Returns
-    -------
-    float
-        H2O solid saturation pressure in Pascal
-    """
-    return 100.0 * np.exp(
-        -6024.5282 / T
-        + 24.7219
-        + 0.010613868 * T
-        - 1.3198825e-5 * T**2
-        - 0.49382577 * np.log(T)
-    )
-
 def check_supersat(RH_i, altitudes, alt_lower, alt_upper):
     """
     Check if the given altitudes and relative humidity (RH) values indicate supersaturation.
@@ -305,61 +465,6 @@ def check_supersat(RH_i, altitudes, alt_lower, alt_upper):
         return True
     else:
         return False
-    
-
-def add_RHi_RHw(matching_files):
-    """
-    Calculate RHi and RHw for all the ERA5 files and add as a new variable.
-    Parameters
-    ----------
-    matching_files : list
-        List of matching ERA5 file names.
-    """ 
-
-    for file in tqdm.tqdm(matching_files, desc="Processing files"):
-        # Construct the full path to the file
-        current_year = file[:4]
-        path2file = f"/home/chinahg/GCresearch/ERA5_downloads/{current_year}/{file}"
-
-        # Open the ERA5 dataset in read mode
-        ds_ERA5 = nc.Dataset(path2file, mode='r')
-
-        # Check if RH_i and RH_w already exist in the netcdf file
-        if 'RH_i' in ds_ERA5.variables and 'RH_w' in ds_ERA5.variables:
-            print(f"Skipping {file} as RH_i and RH_w already exist.")
-            ds_ERA5.close()
-            continue
-        
-        # Extract necessary variables
-        T = ds_ERA5.variables['t'][:]  # Temperature in Kelvin
-        q = ds_ERA5.variables['q'][:]  # Specific humidity
-        pres = ds_ERA5.variables['isobaricInhPa'][:] * 100  # Pressure in Pa
-        T0 = 273.15  # Reference temperature in Kelvin
-        ds_ERA5.close()
-
-        # Calculate saturation vapor pressure with respect to water
-        P_sat_w = compute_Psat_w(T)
-
-        # Calculate RH_w using specific humidity
-        RH_w = 0.263 * pres[:, None, None] * q * np.exp((17.67 * (T - T0)) / (T - 29.65)) ** (-1)
-
-        # Calculate saturation vapor pressure with respect to ice
-        P_sat_i = compute_Psat_i(T)
-
-        # Calculate RH_i
-        RH_i = RH_w * P_sat_w / P_sat_i
-
-        # Open the ERA5 dataset in append mode
-        ds_ERA5 = nc.Dataset(path2file, mode='a')
-
-        # Append RH_i and RH_w to the dataset
-        RH_i_var = ds_ERA5.createVariable('RH_i', 'f4', ('time', 'isobaricInhPa', 'latitude', 'longitude'))
-        RH_w_var = ds_ERA5.createVariable('RH_w', 'f4', ('time', 'isobaricInhPa', 'latitude', 'longitude'))
-        RH_i_var[:] = RH_i
-        RH_w_var[:] = RH_w
-
-        # Save the modified dataset back to the file
-        ds_ERA5.close()
 
 # Function to construct ERA5 file path from GRUAN file path
 def construct_era5_path(era5_base_dir, gruan_file_path):
@@ -394,92 +499,146 @@ def fill_nan_with_next(arr):
         if np.isnan(arr[i]):
             next_valid = next((x for x in arr[i + 1:] if not np.isnan(x)), np.nan)
             arr[i] = next_valid
+    # Convert final array to a numpy array
+    arr = np.array(arr)
     return arr
 
 ############################################################################################################################################################
-# Part 2: Meteorological pre-processing
+# Step 2: Calculate and add RHi and RHw keys to ERA5 nc file
 
-def press2alt(pressure):
+def add_RHi_RHw(matching_files):
     """
-    Convert pressure to altitude.
-
+    Calculate RHi and RHw for all the ERA5 files and add as a new variable.
+    Also check if pressure and time keys are standardized to new 2024 format.
     Parameters
     ----------
-    pressure : Union[int, np.ndarray]
-        Pressure in Pascal.
+    matching_files : list
+        List of matching ERA5 file names.
+    """ 
 
-    Returns
-    -------
-    Union[float, np.ndarray]
-        Altitude in meters.
-    """
-    L = -6.5*10**-3
-    P0 = 101325
-    T0 = 288.15
-    R = 287.053
-    g = 9.81
+    # Make a file with all ERA5 files, as we need to check the contents and formatting
+    directory = '/home/chinahg/GCresearch/ERA5_downloads'
+    csv_path = '/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/era5_files.csv'
 
-    altitudes = np.zeros_like(pressure)
+    files = []
+    for root, dirs, filenames in os.walk(directory):
+        for f in filenames:
+            if f.endswith('.nc'):
+                files.append(f)
 
-    if type(pressure)==int:
-        return (T0/L)*((pressure*100/P0)**(-R*L/g) -1)
-    else:
-        for i in range(len(pressure)):
-            altitudes[i] = (T0/L)*((pressure[i]*100/P0)**(-R*L/g) -1)
+    with open(csv_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for file in files:
+            writer.writerow([file])
 
-        return altitudes
+    # Slurm setup
+    files_per_batch = 500
+    groups = len(files) // files_per_batch + (len(files) % files_per_batch > 0)
+    job_ids = []
 
-def alt2press(altitude):
-    """
-    Convert altitude to pressure.
+    for i in range(groups):
+        start_index = i * files_per_batch
+        end_index = start_index + files_per_batch
+        print(f"Submitting batch {i+1} with files from {start_index} to {end_index}")
 
-    Parameters
-    ----------
-    altitude : Union[float, np.ndarray]
-        Altitude in meters.
+        if end_index > len(files):
+            end_index = len(files)
 
-    Returns
-    -------
-    Union[int, np.ndarray]
-        Pressure in Pascal.
-    """
-    L = -6.5*10**-3
-    P0 = 101325
-    T0 = 288.15
-    R = 287.053
-    g = 9.81
+        # Run slurm jobs to update the files with RHi and RHw
+        export_args = f"ARG1={start_index},ARG2={end_index}"
 
-    if isinstance(altitude, (float, np.float32)):
-        return P0*(1 + L*altitude/T0)**(-g/(R*L))
-    else:
-        pressures = np.zeros_like(altitude)
-        for i in range(len(altitude)):
-            pressures[i] = P0*(1 + L*altitude[i]/T0)**(-g/(R*L))
+        # Submit the job and get the job ID
+        job_ids.append(submit_job_and_get_id("/home/chinahg/GCresearch/contrailuncertainty/Met_processing/add_rh_era5.sh", "has_args", export_args))
+        time.sleep(10)  # Optional: wait a bit before submitting the next job
+    
+    # Wait for the job to complete
+    wait_for_specific_jobs(job_ids)
 
-        return pressures
+    complete_message = "Job(s) completed, continuing with the script!"
+    
+    return complete_message
 
-def compute_Psat_w(T):
-    """
-    Returns water liquid saturation pressure in Pascal.
-    Source: Sonntag (1994)
+############################################################################################################################################################
+# Step 3: Calculate MLD and consolidate ERA5 data and GRUAN data into a single file
 
-    Parameters
-    ----------
-    T : float
-        Temperature in Kelvin
+def process_met_data(GRUAN_base_dir, ERA5_base_dir, generated_files_dir):
+    gruan_file_paths, era5_file_paths = construct_complementary_paths(GRUAN_base_dir, ERA5_base_dir)
 
-    Returns
-    -------
-    float
-        H2O Liquid saturation pressure in Pascal
-    """
-    return 100.0 * np.exp(
-        -6096.9385 / T
-        + 16.635794
-        - 0.02711193 * T
-        + 1.673952e-5 * T**2
-        + 2.433502 * np.log(T)
-    )
+    era5_file_paths = [path for path in era5_file_paths]
+    gruan_file_paths = [path for path in gruan_file_paths]
+
+    print(f"First GRUAN file path: {gruan_file_paths[0]}")
+    print(f"First ERA5 file path: {era5_file_paths[0]}")
+
+    # Define the start and end file indices for processing, as ideally we will split the files into batches for slurm
+    files_per_batch = 100  # Number of files to process per slurm batch
+    batches = len(gruan_file_paths) // files_per_batch + (1 if len(gruan_file_paths) % files_per_batch != 0 else 0)
+    print(f"Number of Slurm jobs to be submitted: {batches}")
+
+    # Fill NaN values in the start and end indices arrays to avoid errors
+    start_indices = np.full(batches, np.NaN)
+    end_indices = np.full(batches, np.NaN)
+
+    # Calculate the start and end indices for each batch
+    for i in range(batches):
+        start_indices[i] = i * files_per_batch
+        end_indices[i] = start_indices[i] + files_per_batch
+        if end_indices[i] > len(gruan_file_paths):
+            end_indices[i] = len(gruan_file_paths)
+
+    job_ids = []  # Initialize an array to store job IDs
+    for i in range(batches):
+        start_index = int(start_indices[i])
+        end_index = int(end_indices[i])
+        batch = i + 1  # Batch number for slurm job, starting from 1
+
+        # Save the required arguments to pass to met_processing.py into a csv file that can be easily read in
+        args = {
+        'start_index': start_index,
+        'end_index': end_index,
+        'files_per_batch': files_per_batch,
+        'era5_file_paths': era5_file_paths,
+        'gruan_file_paths': gruan_file_paths,
+        'batch': batch
+        }
+
+        json_path = f'{generated_files_dir}/met_processing_args.json'
+
+        with open(json_path, "w") as f:
+            json.dump(args, f)
+
+        # Submit the job and get the job ID
+        print(f"Submitting batch {batch} with files from {start_index} to {end_index}")
+        export_args = f"ARG1={json_path}"
+        job_ids.append(submit_job_and_get_id("/home/chinahg/GCresearch/contrailuncertainty/Met_processing/met_matching.sh", "has_args", export_args))
+        time.sleep(5)  # Optional: wait a bit before submitting the next job
+
+    # Wait for the job to complete
+    wait_for_specific_jobs(job_ids)
+
+    complete_message = "Job(s) completed, continuing with the script!"
+    ### WAIT FOR THE JOB TO FINISH THEN CONTINUE
+
+    return complete_message
+
+def construct_complementary_paths(gruan_base_dir, era5_base_dir):
+    # Arrays to store the paths
+    gruan_file_paths = []
+    era5_file_paths = []
+    
+    # Recursively find all GRUAN files and construct corresponding ERA5 file paths
+    for root, dirs, files in os.walk(gruan_base_dir):
+        for file in files:
+            if file.endswith('.nc'):
+                gruan_file_path = os.path.join(root, file)
+                era5_file_path = construct_era5_path(era5_base_dir, gruan_file_path)
+                if os.path.exists(era5_file_path):  # Check if the ERA5 file path exists
+                    gruan_file_paths.append(gruan_file_path)
+                    era5_file_paths.append(era5_file_path)
+                else:
+                    print(f"ERA5 file not found for {gruan_file_path}. Expected at {era5_file_path}.")
+
+    return gruan_file_paths, era5_file_paths
 
 def calculate_evaporation_depth(regime_array, altitudes, RHw, T, pressures, latitude, longitude, met_type):
     """
@@ -634,7 +793,6 @@ def calculate_MLD(altitudes, pressures, humidities, temperatures, latitude, long
           is skipped, and the original regime array is returned as `regime_array_ED`.
         - The function assumes that the input arrays are aligned and of the same length.
     """
-
     # Convert arrays to read as floats
     humidities = np.array(humidities, dtype=float)
     altitudes = np.array(altitudes, dtype=float)
@@ -689,80 +847,46 @@ def linear_diffusion(arr):
 
     return result
 
-def construct_complementary_paths(gruan_base_dir, era5_base_dir):
-    # Arrays to store the paths
-    gruan_file_paths = []
-    era5_file_paths = []
-    
-    # Recursively find all GRUAN files and construct corresponding ERA5 file paths
-    for root, dirs, files in os.walk(gruan_base_dir):
-        for file in files:
-            if file.endswith('.nc'):
-                gruan_file_path = os.path.join(root, file)
-                era5_file_path = construct_era5_path(era5_base_dir, gruan_file_path)
-                if os.path.exists(era5_file_path):  # Check if the ERA5 file path exists
-                    gruan_file_paths.append(gruan_file_path)
-                    era5_file_paths.append(era5_file_path)
-
-    # Sort the paths
-    gruan_file_paths.sort()
-    era5_file_paths.sort()
-    return gruan_file_paths, era5_file_paths
-
 ############################################################################################################################################################
-# Part 3a: Generate APCEMM input files
+# Step 4: Create APCEMM meteorological input files, run APCEMM, and save the output
 
 class APCEMMConfig:
-    def __init__(self):
+    def __init__(self, **kwargs):
+        #DEFAULTS
         # Specify the test
         self.aircraft_engine = "B737-800_CFM56"  # Which aircraft and engine are we using?
         self.test_id = "test_10"  # Test number the met and YAML files are associated with
-        self.training_runs = 20  # Number of APCEMM runs to process for the test
-        self.validation_runs = 20  # Number of APCEMM runs to process for the test
+
+        self.training_runs = 0  # Number of APCEMM runs to process for the test
+        self.validation_runs = 0  # Number of APCEMM runs to process for the test
+        self.novel_runs = 0 # Number of novel runs (no APCEMM)
+
         self.polynomial_degree = 1  # Polynomial degree for the PCE
         self.maximum_degree = 2  # Maximum degree for the PCE
 
         # Define the meteorological APCEMM file dimensions
         self.APCEMM_altitudes = 125  # Number of altitudes recorded in meteorological file
         self.APCEMM_timesteps = 24  # Hours recorded in meteorological file
+        self.APCEMM_output_timesteps = 72 # Number of timesteps in the APCEMM output file (72*10 minutes = 12 hours)
 
         # RHi initial condition distribution details
-        self.IC_std_rhi = 10
-        self.IC_mean_amplitude_rhi = 117
+        self.IC_std_rhi = 0
+        self.IC_mean_amplitude_rhi = 0
         # RHi temporal distribution details
         self.time_std_rhi = 0
         self.time_mean_amplitude_rhi = 0
 
         # MLD initial condition distribution details
         self.IC_std_mld = 20
-        self.IC_mean_amplitude_mld = 100
+        self.IC_mean_amplitude_mld = 0
         # MLD temporal distribution details
         self.time_std_mld = 0
         self.time_mean_amplitude_mld = 0
 
-def combine_parquet_files(input_dir, output_file):
-    """
-    Combine all Parquet files in the input directory into a single Parquet file.
+        for key, val in kwargs.items():
+            setattr(self, key, val)
 
-    Parameters
-    ----------
-    input_dir : str
-        Path to the directory containing the Parquet files.
-    output_file : str
-        Path to save the combined Parquet file.
-    """
-    # Get a list of all Parquet files in the input directory
-    parquet_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.parquet')]
-    
-    # Read and concatenate all Parquet files into a single DataFrame
-    combined_df = pd.concat([pd.read_parquet(f) for f in parquet_files], ignore_index=True)
-    
-    # Save the combined DataFrame to a single Parquet file
-    combined_df.to_parquet(output_file, index=False)
-
-    return combined_df
-
-def generate_apcemm_input_files(base_met_dir, num_met_files, set_type, test_specifications):
+def generate_apcemm_input_files(RHi_sampled, base_met_dir, num_met_files, set_type, test_specifications):
     # Set up output path
     if set_type == "validation":
         out_path = '/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/inputs/validation/APCEMM_met_validation_{}.nc'
@@ -771,32 +895,10 @@ def generate_apcemm_input_files(base_met_dir, num_met_files, set_type, test_spec
     output_file_template = out_path
 
     for run_num in range(1,num_met_files+1):
-
-        # Sample initial condition, throwing out entries under threshold
-        low_RHi_IC = True
-        while low_RHi_IC == True:
-            # Sample stochastic RHi initial condition
-            RHi_IC = np.round(np.random.normal(0, test_specifications.IC_std_rhi, size=1) + test_specifications.IC_mean_amplitude_rhi, 2)
-            if RHi_IC[0] >= 117:
-                low_RHi_IC = False
-
-        # Sample RHi values for the rest of the timesteps, checking for negative values
-        flag_negative = True
-        while flag_negative == True:
-            # Sample fluctuations in RH values, centered around IC mean from ERA5 ensembles
-            RHi_time_samples = np.round(np.random.normal(0, test_specifications.time_std_rhi, size=test_specifications.APCEMM_timesteps-1) + test_specifications.time_mean_amplitude_rhi, 2)
-
-            # Check if RH_sampled has any zero or negative values
-            if np.any(RHi_time_samples <= 0):
-                flag_negative = True
-                print("RHi_sampled contains zero or negative values.")
-            else:
-                flag_negative = False
-
         # Consolidate the sampled RHi values into a matrix
-        RHi_time = np.append(RHi_IC, RHi_time_samples)
+        RHi_array = RHi_sampled[run_num-1,:]  # Get the sampled RHi for the current run [timesteps]
 
-        RHi_sampled_matrix = np.tile(RHi_time, (16, 1)) # Replacing only 16 altitude layers with samples. The rest are predefined as subsaturated. #MUST BE UPDATED WITH MLD ADDITION
+        RHi_sampled_matrix = np.tile(RHi_array, (16, 1)) # Replacing only 16 altitude layers with samples. The rest are predefined as subsaturated. #MUST BE UPDATED WITH MLD ADDITION
 
         # Open the input NetCDF file containing the base metoeorological data
         ds = xr.open_dataset(base_met_dir)
@@ -815,7 +917,7 @@ def generate_apcemm_input_files(base_met_dir, num_met_files, set_type, test_spec
 def generate_yaml_file(test_id, aircraft_engine, set_type, run_num):
     test_num = test_id.split("_")[1]  # Extract the test number from the test ID
     # Define source and destination paths
-    source_path = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/YAML_files/{}_APCEMM_input.yaml".format(aircraft_engine)  # Source YAML file
+    source_path = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/YAML_base_files/{}_APCEMM_input.yaml".format(aircraft_engine)  # Source YAML file
     destination_dir = "/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/test_{}/inputs/{}".format(test_num, set_type)  # Target directory
     destination_path = os.path.join(destination_dir, "APCEMM_input_run_{}.yaml".format(run_num))
 
@@ -838,8 +940,90 @@ def generate_yaml_file(test_id, aircraft_engine, set_type, run_num):
     with open(destination_path, "w") as file:
         yaml.dump(data, file, default_flow_style=False, indent=4)
 
+def combine_parquet_files():
+    """
+    Combine all Parquet files in the input directory into a single Parquet file.
+
+    Parameters
+    ----------
+    input_dir : str
+        Path to the directory containing the Parquet files.
+    output_file : str
+        Path to save the combined Parquet file.
+    """
+    # This is where the Parquet files are stored before combining
+    input_dir = "/home/chinahg/GCresearch/contrailuncertainty/Met_processing/parquet_files"
+    # This is where the combined Parquet file will be saved or is already saved
+    output_file = f'/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/combined_data.parquet'
+
+    if os.path.exists(output_file):
+        print(f"Output file already exists. Skipping combination.")
+        combined_df = pd.read_parquet(output_file)
+        return combined_df
+    
+    # Get a list of all Parquet files in the input directory
+    parquet_files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.endswith('.parquet')]
+
+    # Read and concatenate all Parquet files into a single DataFrame
+    combined_df = pd.concat([pd.read_parquet(f) for f in parquet_files])
+    # Save the combined DataFrame to a single Parquet file
+    combined_df.to_parquet(output_file, index=False)
+
+    return combined_df
+
 ############################################################################################################################################################
-# Part 3b:  Save APCEMM input and output variables to a PCE readable format
+# Step 4: Create APCEMM meteorological input files, run APCEMM, and save the output
+
+def create_and_validate_surrogate(test_specifications):
+    # Load in APCEMM inputs and outputs
+    # APCEMM inputs that were trained on, and we also have the True solution for
+    raw_training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/training/training_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM training data
+    # APCEMM inputs that were not trained on, and we also have the True solution for
+    raw_validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{}/outputs/validation/validation_sample_matrix.npy'.format(test_specifications.test_id)) # Import APCEMM validation data
+
+    # APCEMM has issues with artifacts, smooth those out as pre-processing
+    clean_training_samples_matrix_offline = np.copy(raw_training_samples_matrix_offline)
+    clean_validation_samples_matrix_offline = np.copy(raw_validation_samples_matrix_offline)
+
+    for i in range(test_specifications.training_runs):
+        clean_training_samples_matrix_offline[1, i, :] = smooth_artifacts(raw_training_samples_matrix_offline[1,i,:])
+    for i in range(test_specifications.validation_runs):
+        clean_validation_samples_matrix_offline[1, i, :] = smooth_artifacts(raw_validation_samples_matrix_offline[1,i,:])
+
+    # Save the smoothed training and validation sample matrices
+    # Specify the directory to save the results
+    results_dir = f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_specifications.test_id}"
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir, exist_ok=False)
+
+    np.save(f"{results_dir}/training_samples_matrix_offline_cleaned.npy", clean_training_samples_matrix_offline)
+    np.save(f"{results_dir}/validation_samples_matrix_offline_cleaned.npy", clean_validation_samples_matrix_offline)
+
+    # Create the PCE with the training data
+    coefficients, alpha = create_PCE(test_specifications, "training")
+    
+    # Save the PCE coefficients and alpha set
+    np.save(f"{results_dir}/PCE_coefficients.npy", coefficients)
+    np.save(f"{results_dir}/PCE_alpha_set.npy", alpha)
+
+    print("PCE model created successfully!")
+
+    # Validate the PCE model with the validation data
+    # Predict the validation solutions based on the trained PCE
+    predicted_validation_solutions = predict_validation_solutions(coefficients, alpha, test_specifications)
+
+    print("PCE validation tests ran successfully!")
+
+    # Save the predicted and true validation solutions
+    np.save(f"{results_dir}/predicted_validation_solutions.npy", predicted_validation_solutions)
+    np.save(f"{results_dir}/true_validation_solutions.npy", true_validation_solutions("validation", test_specifications.test_id))
+
+    # Save the training solutions
+    np.save(f"{results_dir}/true_training_solutions.npy", true_training_solutions("training", test_specifications.test_id))
+
+    complete_message = f"Saved PCE training and validation results here: {results_dir}"
+
+    return complete_message
 
 class apcemm_data_struct:
     def __init__(self, t, ds_t, int_OD, RHi):
@@ -872,17 +1056,19 @@ def create_sample_matrix(test_specifications, set_type): # NEED TO UPDATE WITH M
     # Define constants
     test_id = test_specifications.test_id
     num_runs = test_specifications.training_runs if set_type == "training" else test_specifications.validation_runs
-    IC_mean_amplitude_rhi = test_specifications.IC_mean_amplitude_rhi
     sample_arrays = []
 
     for i in range(1, num_runs+1): # For test runs num_runs
         if set_type == "validation": # If you are processing a validation set
             apcemm_data = read_apcemm_data(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/outputs/validation/{test_id}_run_{i}')
             input_RHi_ds = xr.open_dataset(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/inputs/validation/APCEMM_met_validation_{i}.nc')
-        else: # If you are processing a training set
+        elif set_type == "training": # If you are processing a training set
             apcemm_data = read_apcemm_data(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/outputs/training/{test_id}_run_{i}')
             input_RHi_ds = xr.open_dataset(f'/home/chinahg/GCresearch/contrailuncertainty/PCE/APCEMM_data_sets/{test_id}/inputs/training/APCEMM_met_{i}.nc')
-
+        elif set_type != "novel":
+            raise ValueError("Invalid set_type. Must be 'training', 'validation', or 'novel'.")
+        
+        # Import the ERA5 and GRUAN data
         int_OD = apcemm_data.int_OD
         recorded_timesteps = len(int_OD)
 
@@ -896,6 +1082,7 @@ def create_sample_matrix(test_specifications, set_type): # NEED TO UPDATE WITH M
 
         # Define your input_RHi array (length 24 --> 24 hours in original met file)
         input_RHi = input_RHi_ds['relative_humidity_ice'][98].values # RHi values for times 0-24 hours at pressure level index 98. 
+        IC_mean_amplitude_rhi = input_RHi[0] # The first value is the mean amplitude of the RHi initial condition, used to normalize the RHi values
 
         # Expand input_RHi to match the timestamps output by APCEMM. APCEMM is run for 12 hours at 10-minute intervals. The met file is for 24 hours at 1-hour intervals.
         # 1 hour is 6 10-minute intervals, so we repeat each RHi value 6 times to match met input to the APCEMM output.
@@ -921,9 +1108,63 @@ def create_sample_matrix(test_specifications, set_type): # NEED TO UPDATE WITH M
 
     print(f"{set_type} sample matrix created and saved successfully.")
 
+# Downselect the DataFrame to include only rows where 8000 <= E_alt <= 13000 and 8000 <= G_alt <= 13000
+def filter_row_by_alt(row):
+    # Create a boolean mask for G_alt between 8000 and 13000
+    mask = (row['G_alt'] >= 9000) & (row['G_alt'] <= 12000)
+
+    # Apply the mask to all relevant columns
+    row['G_alt'] = row['G_alt'][mask]
+    row['G_RHi'] = row['G_RHi'][mask]  # do this for each array-like column
+    row['E_RHi_diffused'] = row['E_RHi_diffused'][mask]
+    return row
+    
+# def get_initial_dist(already_combined):
+#     # Create a probability density function (PDF) for the RHi and MLD distributions
+#     # This function will load the GRUAN and ERA5 data and create a PDF for each variable
+
+#     # Combine all parquet files in the base directory into a single DataFrame
+#     # combined_parquet_name = 'combined_data.parquet'
+#     if already_combined == False:
+#         combined_df = combine_parquet_files() # Check the first few rows of the combined DataFrame
+#     elif already_combined == True:
+#         # Load the combined DataFrame from the parquet file
+#         print("Loading combined DataFrame from parquet file...")
+#         combined_df = pd.read_parquet("/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/combined_data.parquet")
+
+#     # Extract the RHi and MLD columns from the DataFrame, keeping the GRUAN and ERA5 data separate
+#     print("Extracting GRUAN and ERA5 data...")
+#     print(combined_df.dtypes)
+#     # Print the rows in the combined DataFrame
+#     print("Rows in the combined DataFrame:")
+#     print(combined_df)
+#     print("Number of rows in combined DataFrame:", len(combined_df))
+
+#     # Apply to the DataFrame
+#     combined_df = combined_df.apply(filter_row_by_alt, axis=1)
+    
+#     gruan_RHi = np.array(np.concatenate(combined_df['G_RHi'].values),dtype=float)
+#     era5_RHi = np.array(np.concatenate(combined_df['E_RHi_diffused'].values),dtype=float)
+#     # gruan_MLD = np.array(combined_df['G_MLD'].values,dtype=float) # FIX PARQUET UNPACKING
+#     # era5_MLD = np.array(combined_df['E_MLD'].values,dtype=float)
+
+#     # Remove NaN values from the data
+#     gruan_RHi = gruan_RHi[~np.isnan(gruan_RHi)]
+#     era5_RHi = era5_RHi[~np.isnan(era5_RHi)]
+#     # gruan_MLD = gruan_MLD[~np.isnan(gruan_MLD)]
+#     # era5_MLD = era5_MLD[~np.isnan(era5_MLD)]
+
+#     # Create a PDF for each variable using the GRUAN and ERA5 data using KDE (Kernel Density Estimation)
+#     print("Creating PDFs for GRUAN and ERA5 data...")
+#     gruan_RHi_pdf = gaussian_kde(gruan_RHi)
+#     era5_RHi_pdf = gaussian_kde(era5_RHi)
+#     # gruan_MLD_pdf = gaussian_kde(gruan_MLD.explode().astype(float))
+#     # era5_MLD_pdf = gaussian_kde(era5_MLD.explode().astype(float))
+
+#     return gruan_RHi, era5_RHi, gruan_RHi_pdf, era5_RHi_pdf#, gruan_MLD_pdf, era5_MLD_pdf
+
 #############################################################################################################################################################
-# Part 4/5/6: Create and validate the PCE model
-from numpy.matlib import repmat
+# Step 5: Create and validate the PCE model
 
 def totalOrderMultiIndices(m, p):
     """
@@ -997,7 +1238,7 @@ def true_training_solutions(sample_type:str, test_id):
     return true_output
 
 ### NEED TO UPDATE OFFLINE FUNCTIONS TO DISTINGUISH VALIDATION AND TRAINING PATHS
-def predicted_validation_solutions(c, alpha_set, test_specifications): # Validation inputs to PCE from offline pre-computed validation set
+def predict_validation_solutions(c, alpha_set, test_specifications): # Validation inputs to PCE from offline pre-computed validation set
     validation_runs = test_specifications.validation_runs
     test_id = test_specifications.test_id
     sample_type = "validation"
@@ -1047,7 +1288,7 @@ def compute_c(sample_type:str, test_specifications):
 def func_eval_offline(sample_type:str, test_id):
 
     if sample_type == "training":
-        training_samples_matrix_offline =np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
+        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
 
         training_samples_matrix_offline_OUTPUTS = training_samples_matrix_offline[1,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
         # Transpose the rows and columns to accomodate later calculations
@@ -1055,7 +1296,7 @@ def func_eval_offline(sample_type:str, test_id):
         return training_samples_matrix_offline_OUTPUTS
     
     elif sample_type == "validation":
-        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
 
         validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline[1,:,:]
         validation_samples_matrix_offline_OUTPUTS = validation_samples_matrix_offline_OUTPUTS.T
@@ -1069,7 +1310,7 @@ def func_eval_offline(sample_type:str, test_id):
 def get_samples_matrix_offline(sample_type:str, test_id):
 
     if sample_type == "training":
-        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
+        training_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{}/training_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM training data
 
         training_samples_matrix_offline_INPUTS = training_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets to train PCE, timesteps)
         training_samples_matrix_offline_INPUTS = training_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets to train PCE)
@@ -1077,7 +1318,7 @@ def get_samples_matrix_offline(sample_type:str, test_id):
         return training_samples_matrix_offline_INPUTS
     
     elif sample_type == "validation":
-        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/PCE/PCE_results/APCEMM_PCE_results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
+        validation_samples_matrix_offline = np.load('/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{}/validation_samples_matrix_offline_cleaned.npy'.format(test_id)) # Import APCEMM validation data
 
         validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline[0,:,:] # (depth, row, column) --> (0=input 1=output, number of datasets, timesteps)
         validation_samples_matrix_offline_INPUTS = validation_samples_matrix_offline_INPUTS.T # (timesteps, number of datasets)
@@ -1122,7 +1363,7 @@ def smooth_artifacts(offline_samples_matrix):
     return y_cleaned
 
 #############################################################################################################################################################
-# Part 7: Compute sensitivity indices
+# Step: Compute sensitivity indices
 
 def compute_total_effect_sensitivity_indices(coefficients, num_variables):
     """
@@ -1157,4 +1398,277 @@ def compute_total_effect_sensitivity_indices(coefficients, num_variables):
         S_T[f"S_T_{var_idx}"] = variance_contribution / total_variance
 
     return S_T
+
+#############################################################################################################################################################
+# Step: Make novel input matrices for the surrogate model
+
+def post_process_met_data():
+    df_combined = combine_parquet_files()
+    
+    # Extract RHi values for GRUAN and ERA5
+    # Each cell in 'G_RHi' and 'E_RHi_diffused' is a list; flatten them for all rows
+    gruan_rhi = [item for sublist in df_combined['G_RHi'] for item in sublist]
+    era5_rhi = [item for sublist in df_combined['E_RHi_diffused'] for item in sublist]
+
+    e_indices_to_remove = []
+    g_indices_to_remove = []
+
+    cleaned_gruan_rhi = gruan_rhi[:]
+    cleaned_era5_rhi = era5_rhi[:]
+
+    # Check if any values are NaN
+    for i in range(len(gruan_rhi)):
+        if pd.isna(gruan_rhi[i]):
+            g_indices_to_remove.append(i)
+
+    for i in range(len(era5_rhi)):
+        if pd.isna(era5_rhi[i]):
+            e_indices_to_remove.append(i)
+
+    combined_indices_to_remove = sorted(g_indices_to_remove + e_indices_to_remove, reverse=True)
+
+    for index in combined_indices_to_remove:
+        if 0 <= index < len(cleaned_era5_rhi):
+            cleaned_era5_rhi.pop(index)
+            cleaned_gruan_rhi.pop(index)
+
+    # Convert era5_rhi and gruan_rhi to numpy arrays for easier manipulation
+    cleaned_era5_rhi = np.array(cleaned_era5_rhi)
+    cleaned_gruan_rhi = np.array(cleaned_gruan_rhi)
+
+    # Check if any values are NaN after the removal
+    if np.isnan(cleaned_era5_rhi).any() or np.isnan(cleaned_gruan_rhi).any():
+        print("NaN values still present after removal!")
+
+    # Filter pairs where ERA5 RHi is less than or equal to 200
+    mask = cleaned_era5_rhi <= 150
+    filtered_gruan_rhi = cleaned_gruan_rhi[mask]
+    filtered_era5_rhi = cleaned_era5_rhi[mask]
+
+    # Fit the ERA5 data to a Gaussian distribution, but only for RHi values between 90 and 140
+    era5_rhi_input = filtered_era5_rhi[(filtered_era5_rhi >= 110) & (filtered_era5_rhi <= 140)]
+    mirror_data = 2*3 - era5_rhi_input + 214
+
+    # Combine the original and mirrored data
+    combined_data = np.concatenate((era5_rhi_input, mirror_data))
+    # Fit a Gaussian distribution to the combined data
+    mean = np.mean(combined_data)
+    std_dev = np.std(combined_data)
+
+    return mean, std_dev, filtered_gruan_rhi, filtered_era5_rhi
+
+def make_surrogate_input(test_specifications, run_type):
+    test_id = test_specifications.test_id
+    
+    if run_type == 'training':
+        timesteps = test_specifications.APCEMM_timesteps # 24 hours
+        num_runs = test_specifications.training_runs
+    elif run_type == 'validation':
+        timesteps = test_specifications.APCEMM_timesteps # 24 hours
+        num_runs = test_specifications.validation_runs
+    elif run_type == "novel":
+        timesteps = test_specifications.APCEMM_output_timesteps # 72 * 10 minutes = 720 minutes = 12 hours
+        num_runs = test_specifications.novel_runs
+    else:
+        raise ValueError("Invalid run_type. Must be 'novel', 'training', or 'validation'.")
+    
+    mean_rhi, std_rhi, gruan_rhi, era5_rhi = post_process_met_data()
+    initial_rhi = np.zeros(num_runs) # Initialize the initial RHi values array
+    
+    # Only keep values where a contrail will form, i.e. RHi >= 117
+    i = 0
+    while i < num_runs:
+        sampled_value = np.random.normal(mean_rhi, std_rhi, 1)
+        if sampled_value >= 117 and sampled_value <= 140: # Ensure the sampled value is within the range of RHi values
+            initial_rhi[i] =  sampled_value # This is how we will sample the initial conditions
+            i = i+1
+
+    # Sample the timesteps after the initial condition
+    # Input: Initial RHi conditions
+    # Steps: Map each IC to error distribution, sample error distribution for timesteps
+    # Output: Matrix of size (num_runs, 72) with sampled RHi values
+    # Compute the difference between ERA5 and GRUAN RHi values
+    
+    # Compute the difference between ERA5 and GRUAN RHi values
+    rhi_diff = np.abs(np.array(era5_rhi) - np.array(gruan_rhi))
+    
+    rhi_time = np.zeros((num_runs, timesteps-1)) # Initialize the time-dependent RHi values matrix (num_runs, timesteps-1)
+    for i in range(num_runs):
+        rhi = initial_rhi[i]
+        idx_nearest = np.abs(np.array(era5_rhi) - rhi).argmin() # Find the index of the closest RHi value in the ERA5 data
+
+        print(f"Sampling RHi for run {i+1}/{num_runs} with initial RHi: {rhi:.2f}")
+
+        # Get the corresponding error from the RHi difference
+        IC_error = rhi_diff[idx_nearest]
+        print(f"IC error for run {i+1}: {IC_error:.2f}")
+
+        # Define the variance of a gaussian by the error: 99.7% of the data lies within +- IC/4
+        std_time = IC_error / 4
+
+        # Sample the initial RHi values from a Gaussian distribution
+        rhi_time[i,:] = np.random.normal(rhi, std_time, timesteps-1) # runs x timesteps-1
+    
+    # Make initial_rhi shape (num_runs, timesteps) with the first column being the initial RHi values
+    initial_rhi = initial_rhi.reshape(num_runs, 1) # Reshape to (num_runs, 1)
+    input_rhi = np.hstack((initial_rhi, rhi_time)) # Concatenate the initial RHi values with the sampled time-dependent RHi values
+    
+    if run_type == "novel":
+        # Save the input RHi matrix for novel runs
+        if not os.path.exists(f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}"):
+            os.makedirs(f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}", exist_ok=False)
+        
+        print(f"Saving novel samples matrix to: /home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}/novel_samples_matrix.npy")
+        np.save(f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}/novel_samples_matrix.npy", input_rhi)
+
+    # # Get temperature fluxuations from the ERA5 data and apply to the initial temperature values
+    # # Find the temperature associated with the closest RHi value to the sampled initial RHi
+    # df_combined = combine_parquet_files(input_dir, output_file)
+    # closest_indices = []
+    # for rhi_value in initial_rhi:
+    #     closest_index = (np.abs(df_combined['E_RHi_diffused'] - rhi_value)).idxmin()
+    #     closest_indices.append(closest_index)
+    # initial_temperatures = df_combined['G_T'].iloc[closest_indices].values
+    # initial_q = df_combined['G_q'].iloc[closest_indices].values
+
+    # # We have the initial temperature associated with the initial RHi values, now we need to sample the temperature fluctuations
+    # # Get the temperature values from the met file
+
+    # # Read in the temperature array at pressure level 240 hPa (or the closest pressure level to that)
+
+    # met_file_temperatures = ds_met['temperature'][idx_240, :].values  # shape: (timesteps,)
+    # met_file_q = ds_met['specific_humidity'][idx_240, :].values  # shape: (timesteps,)
+    # ds_met.close()
+
+    return input_rhi#, initial_temperatures
+
+def novel_solutions(c, alpha_set, test_specifications): # Validation inputs to PCE from offline pre-computed validation set
+    novel_runs = test_specifications.novel_runs
+    test_id = test_specifications.test_id
+    multiindices = alpha_set.shape[0]
+    He_array = np.zeros((multiindices, novel_runs))
+    results_dir = f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}"
+    samples_matrix = np.load(f"{results_dir}/novel_samples_matrix.npy")
+
+    for i in tqdm.tqdm(range(novel_runs)): # for each run
+        
+        for j in range(multiindices): # for each coefficient
+            current_alpha = alpha_set[j, :] # look at one row at a time for all alpha describing a single coefficient
+            samples_matrix_He = samples_matrix[i, :]
+            He_array[j, i] = compute_He(samples_matrix_He, current_alpha)
+
+    # Solve for the Least Squares solution
+    novel_solutions = (c.T @ He_array).T
+
+    print("PCE novel tests ran successfully!")
+
+    # Save the predicted and true validation solutions
+    np.save(f"{results_dir}/novel_solutions.npy", novel_solutions)
+
+    complete_message = f"Saved PCE novel sample results here: {results_dir}/novel_solutions.npy"
+
+    return complete_message
+
+#############################################################################################################################################################################
+# Step : Compute fluxes for each timestep
+
+def updateInput(filepath, attributes, contrail, type):
+    """
+    Update the input file with the given attributes.
+
+    Parameters:
+    - filepath (str): The path of the input file to be updated.
+    - attributes (object): An object containing the attributes to be written to the input file.
+    - contrail (bool): A flag indicating whether the input file is for contrail simulation or not.
+
+    Returns:
+    None
+    """
+    file = open(filepath,"w")
+    if contrail == True and type == "water":
+        file.writelines(["rte_solver "+attributes.rte_solver[0]+"\n",
+                            "source "+attributes.source[0]+"\n",
+                            "sza "+attributes.sza[0]+"\n",
+                            "wavelength "+attributes.wavelength[0]+"\n",
+                            "mol_abs_param "+attributes.mol_abs_param[0]+"\n",
+                            "umu "+attributes.umu[0]+"\n",
+                            "output_user "+attributes.output_user[0]+"\n",
+                            "zout "+attributes.zout[0]+"\n",
+                            "output_process "+attributes.output_process[0]+"\n",
+                            "atmosphere_file "+str(attributes.atmosphere_file[0])+"\n",
+                            "wc_file 1D cloud.in\n",
+                            "quiet"])
+        file.close()
+    elif contrail == True and type == "ice":
+        file.writelines(["rte_solver "+attributes.rte_solver[0]+"\n",
+                            "source "+attributes.source[0]+"\n",
+                            "sza "+attributes.sza[0]+"\n",
+                            "wavelength "+attributes.wavelength[0]+"\n",
+                            "mol_abs_param "+attributes.mol_abs_param[0]+"\n",
+                            "umu "+attributes.umu[0]+"\n",
+                            "output_user "+attributes.output_user[0]+"\n",
+                            "zout "+attributes.zout[0]+"\n",
+                            "output_process "+attributes.output_process[0]+"\n",
+                            "atmosphere_file "+str(attributes.atmosphere_file[0])+"\n", 
+                            "ic_habit "+str(attributes.ic_habit[0])+"\n",
+                            "ic_properties "+str(attributes.ic_properties[0])+"\n",
+                            "ic_file 1D "+attributes.ic_file[0]+"\n",
+                            "ic_modify tau set " +attributes.ic_modify[0]+"\n",
+                            "quiet"])
+        file.close()
+    else: 
+        file.writelines(["rte_solver "+attributes.rte_solver[0]+"\n",
+                            "source "+attributes.source[0]+"\n",
+                            "sza "+attributes.sza[0]+"\n",
+                            "wavelength "+attributes.wavelength[0]+"\n",
+                            "mol_abs_param "+attributes.mol_abs_param[0]+"\n",
+                            "umu "+attributes.umu[0]+"\n",
+                            "output_user "+attributes.output_user[0]+"\n",
+                            "zout "+attributes.zout[0]+"\n",
+                            "output_process "+attributes.output_process[0]+"\n",
+                            "atmosphere_file "+str(attributes.atmosphere_file[0])+"\n",
+                            "quiet\n"])
+        file.close()
+    
+# def clearskyRF(attributes):
+#     """
+#     Run the clear sky radiative forcing simulation.
+
+#     Parameters:
+#     - attributes (object): An object containing the attributes for the simulation.
+
+#     Returns:
+#     - LRToutput (list): A list containing the output of the simulation.
+#     """
+#     updateInput("/home/chinahg/GCresearch/contrailuncertainty/LRT/thermal-clear.in", attributes, False, "None")
+#     LRToutput = !LD_LIBRARY_PATH=/data/home/chinahg/.conda/envs/afca-test/lib:$LD_LIBRARY_PATH /home/iross/misc-code/libRadtran/bin/uvspec < /home/chinahg/GCresearch/contrailuncertainty/LRT/thermal-clear.in # [X,X,X,net TOA flux]
+#     return LRToutput
+
+# def contrailRF(attributes, type):
+#     """
+#     Run the contrail radiative forcing simulation.
+
+#     Parameters:
+#     - attributes (object): An object containing the attributes for the simulation.
+
+#     Returns:
+#     - LRToutput (list): A list containing the output of the simulation.
+#     """
+#     updateInput("/home/chinahg/GCresearch/contrailuncertainty/LRT/thermal-cloud.in", attributes, True, type)
+#     LRToutput = !LD_LIBRARY_PATH=/data/home/chinahg/.conda/envs/afca-test/lib:$LD_LIBRARY_PATH /home/iross/misc-code/libRadtran/bin/uvspec < /home/chinahg/GCresearch/contrailuncertainty/LRT/thermal-cloud.in # [X,X,X,X,X,net TOA flux]
+#     return LRToutput
+
+# def reformatResults(resultsRaw):
+#     """
+#     Reformat the raw results.
+
+#     Parameters:
+#     - resultsRaw (list): A list containing the raw results.
+
+#     Returns:
+#     - li (list): A list containing the reformatted results.
+#     """
+#     string = str(resultsRaw[0].strip().replace("  ", " "))
+#     li = list(string.split(" ")) 
+#     return li
 
