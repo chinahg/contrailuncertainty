@@ -1471,47 +1471,38 @@ def make_surrogate_input(test_specifications, run_type):
         num_runs = test_specifications.novel_runs
     else:
         raise ValueError("Invalid run_type. Must be 'novel', 'training', or 'validation'.")
+
+    mean_rhi, std_rhi, gruan_rhi, era5_rhi = lib.post_process_met_data()
     
-    mean_rhi, std_rhi, gruan_rhi, era5_rhi = post_process_met_data()
-    initial_rhi = np.zeros(num_runs) # Initialize the initial RHi values array
-    
-    # Only keep values where a contrail will form, i.e. RHi >= 117
-    i = 0
-    while i < num_runs:
-        sampled_value = np.random.normal(mean_rhi, std_rhi, 1)
-        if sampled_value >= 117 and sampled_value <= 140: # Ensure the sampled value is within the range of RHi values
-            initial_rhi[i] =  sampled_value # This is how we will sample the initial conditions
-            i = i+1
+    initial_rhi = 125 #np.linspace(100,140, num_runs, dtype=int) # Generate initial RHi values linearly spaced between 100 and 140 for the number of runs
+    print(f"Initial RHi values: {initial_rhi}")
 
     # Sample the timesteps after the initial condition
     # Input: Initial RHi conditions
-    # Steps: Map each IC to error distribution, sample error distribution for timesteps
+    # Steps: Map each IC to error distribution, sample error distribution X times
     # Output: Matrix of size (num_runs, 72) with sampled RHi values
-    # Compute the difference between ERA5 and GRUAN RHi values
     
     # Compute the difference between ERA5 and GRUAN RHi values
     rhi_diff = np.abs(np.array(era5_rhi) - np.array(gruan_rhi))
     
-    rhi_time = np.zeros((num_runs, timesteps-1)) # Initialize the time-dependent RHi values matrix (num_runs, timesteps-1)
-    for i in range(num_runs):
-        rhi = initial_rhi[i]
-        idx_nearest = np.abs(np.array(era5_rhi) - rhi).argmin() # Find the index of the closest RHi value in the ERA5 data
+    input_rhi = np.zeros((num_runs+1, timesteps)) # Initialize the time-dependent RHi values matrix (total runs, timesteps)
 
-        print(f"Sampling RHi for run {i+1}/{num_runs} with initial RHi: {rhi:.2f}")
+    idx_nearest = np.abs(np.array(era5_rhi) - initial_rhi).argmin() # Find the index of the closest RHi value in the ERA5 data
 
-        # Get the corresponding error from the RHi difference
-        IC_error = rhi_diff[idx_nearest]
-        print(f"IC error for run {i+1}: {IC_error:.2f}")
+    print(f"Sampling RHi perturbations with initial RHi: {initial_rhi:.2f}")
 
-        # Define the variance of a gaussian by the error: 99.7% of the data lies within +- IC/4
-        std_time = IC_error / 4
+    # Get the corresponding error from the RHi difference
+    IC_error = rhi_diff[idx_nearest]
+    print(f"IC error for {initial_rhi:.2f}: {IC_error:.2f}")
 
-        # Sample the initial RHi values from a Gaussian distribution
-        rhi_time[i,:] = np.random.normal(rhi, std_time, timesteps-1) # runs x timesteps-1
+    # Define the variance of a gaussian by the error: 99.7% of the data lies within +- IC/4
+    std_IC = IC_error / 4
     
-    # Make initial_rhi shape (num_runs, timesteps) with the first column being the initial RHi values
-    initial_rhi = initial_rhi.reshape(num_runs, 1) # Reshape to (num_runs, 1)
-    input_rhi = np.hstack((initial_rhi, rhi_time)) # Concatenate the initial RHi values with the sampled time-dependent RHi values
+    input_rhi[0,:] = np.ones(timesteps) * initial_rhi # Set the first row to the initial RHi value
+    for j in range(num_runs): # for each perturbation sample the RHi value
+        # Sample the initial RHi values from a Gaussian distribution
+        input_rhi[j+1,:] = np.ones(timesteps)*np.random.normal(initial_rhi, std_IC, 1) # runs x timesteps
+
     
     if run_type == "novel":
         # Save the input RHi matrix for novel runs
@@ -1521,26 +1512,7 @@ def make_surrogate_input(test_specifications, run_type):
         print(f"Saving novel samples matrix to: /home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}/novel_samples_matrix.npy")
         np.save(f"/home/chinahg/GCresearch/contrailuncertainty/start_here/generated_files/results/{test_id}/novel_samples_matrix.npy", input_rhi)
 
-    # # Get temperature fluxuations from the ERA5 data and apply to the initial temperature values
-    # # Find the temperature associated with the closest RHi value to the sampled initial RHi
-    # df_combined = combine_parquet_files(input_dir, output_file)
-    # closest_indices = []
-    # for rhi_value in initial_rhi:
-    #     closest_index = (np.abs(df_combined['E_RHi_diffused'] - rhi_value)).idxmin()
-    #     closest_indices.append(closest_index)
-    # initial_temperatures = df_combined['G_T'].iloc[closest_indices].values
-    # initial_q = df_combined['G_q'].iloc[closest_indices].values
-
-    # # We have the initial temperature associated with the initial RHi values, now we need to sample the temperature fluctuations
-    # # Get the temperature values from the met file
-
-    # # Read in the temperature array at pressure level 240 hPa (or the closest pressure level to that)
-
-    # met_file_temperatures = ds_met['temperature'][idx_240, :].values  # shape: (timesteps,)
-    # met_file_q = ds_met['specific_humidity'][idx_240, :].values  # shape: (timesteps,)
-    # ds_met.close()
-
-    return input_rhi#, initial_temperatures
+    return input_rhi
 
 def novel_solutions(c, alpha_set, test_specifications): # Validation inputs to PCE from offline pre-computed validation set
     novel_runs = test_specifications.novel_runs
