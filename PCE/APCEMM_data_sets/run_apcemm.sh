@@ -1,6 +1,6 @@
 #!/bin/bash                                   
 
-#SBATCH --time=4:00:00
+#SBATCH --time=2:00:00
 #SBATCH --constraint=tengig
 #SBATCH --job-name="APCEMM run"
 #SBATCH --mail-type=BEGIN,END
@@ -11,6 +11,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --partition=normal
 #SBATCH --mem-per-cpu=4000MB
+
 #####################################
 
 # for i in {4..5}

@@ -9,7 +9,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --partition=normal
-#SBATCH --mem=5000MB
+#SBATCH --mem=20000MB
 #####################################
 
 /home/chinahg/.conda/envs/contrails/bin/python /home/chinahg/GCresearch/contrailuncertainty/start_here/pipeline.py
