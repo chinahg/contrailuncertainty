@@ -63,7 +63,7 @@ METEOROLOGY MENU:
         Interpolate shear met. data (T/F): F
         Interpolate temp. met. data (T/F): T
         Interpolate vert. veloc. met. data (T/F): F
-        Met input file path (string): /home/chinahg/GCresearch/contrailuncertainty/APCEMM_vs_CoCiP_vs_LES/APCEMM/epm_bypass_new_pdfs/110T205L25/110T205L25.nc
+        Met input file path (string): BASE-UPDATE
         RH time series input (T/F): T
         Temp. time series input (T/F): T
         Time series data timestep [hr] (double): 1.0
@@ -125,7 +125,7 @@ SIMULATION MENU:
     Input background condition (string): /home/chinahg/GCresearch/APCEMM/input_data/init.txt
     Input engine emissions (string): /home/chinahg/GCresearch/APCEMM/input_data/ENG_EI.txt
     OUTPUT SUBMENU:
-        Output folder (string): /home/chinahg/GCresearch/contrailuncertainty/APCEMM_vs_CoCiP_vs_LES/APCEMM/epm_bypass_new_pdfs/110T205L25/outputs
+        Output folder (string): BASE-UPDATE
         Overwrite if folder exists (T/F): T
     OpenMP Num Threads (positive int): 8
     PARAM SWEEP SUBMENU:
@@ -134,7 +134,7 @@ SIMULATION MENU:
         Run Monte Carlo (T/F): F
     RANDOM NUMBER GENERATION SUBMENU:
         Force seed value (T/F): F
-        Seed value (positive int): 0
+        Seed value (positive int): 3
     SAVE FORWARD RESULTS SUBMENU:
         Save forward results (T/F): F
         netCDF filename format (string): APCEMM_Case_*
