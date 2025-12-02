@@ -1,0 +1,14 @@
+data_files_path data             # Location of libRadtran data files
+source solar data/solar_flux/atlas_plus_modtran             # Calculate the shortwave radiation, location of the extraterrestrial spectrum
+latitude N 45             # Latitude of the location
+longitude W 45             # Longitude of the location
+time 2025 6 29 0 0 0             # Local time YYYY MM DD hh mm ss
+albedo 0.2             # Surface albedo
+rte_solver disort             # Radiative transfer equation solver
+mol_abs_param reptran             # Fine structure parameter
+number_of_streams 6             # Number of streams
+wavelength 299 341             # Wavelength range [nm]
+zout TOA             # Sum at the top of atmosphere
+output_process integrate             # Spectrally integrate the output
+output_user edir eglo edn eup enet esum             # Return direct/global/downward/upward irradiance. Net = global - upward.
+quiet              # No description provided
