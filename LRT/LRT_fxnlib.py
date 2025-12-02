@@ -82,10 +82,10 @@ def make_LW_options(habit, hour, ice_in_path):
         ["latitude", "N 45", "Latitude of the location"],
         ["longitude", "W 45", "Longitude of the location"],
         ["time", f"2025 6 29 {hour} 0 0", "Local time YYYY MM DD hh mm ss"],  # Example times
-        ["albedo", "0.2", "Surface albedo"],
+        ["albedo", "0.06", "Surface albedo over open ocean"],
         ["rte_solver", "disort", "Radiative transfer equation solver"],
-        ["mol_abs_param", "reptran", "Fine structure parameter"],
-        ["number_of_streams", "6", "Number of streams"],
+        ["mol_abs_param", "reptran", "Provides correlated-k absorption coefficients"],
+        ["number_of_streams", "16", "Number of discrete zenith-angle directions DISORT uses"],
         ["wavelength", "OVERWRITE", "Wavelength range [nm]"],
         ["zout", "TOA", "Sum at the top of atmosphere"],
         ["ic_file", f"1D {ice_in_path}", "Ice properties input file"],
@@ -93,7 +93,7 @@ def make_LW_options(habit, hour, ice_in_path):
         ["output_process", "integrate", "Spectrally integrate the output"],
         ["output_user", "edir eglo edn eup enet esum",
          "Return direct/global/downward/upward irradiance. Net = global - upward."],
-        ["quiet", "", ""]
+        ["quiet", "", "Suppress output dialog"]
     ]
 
     if habit == "ghm": # Baum 2005a parametrization for the general habit mixture

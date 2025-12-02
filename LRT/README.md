@@ -31,12 +31,22 @@ Implements LRT Python wrapper for APCEMM and CoCiP modelled contrails. Drivers c
     - Open ./APCEMM_RF.sh and update the number of CPUs and paths
     - Call sbatch ./APCEMM_RF.sh from your terminal on Hex
 - An output file is a CSV with 3 columns
+
+    Longwave Output
     - Contrail_Age_hours: Age of the contrail in hours
     - LW_Radiative_Forcing_W_m2: Net longwave radiative forcing in W/m2. Equal to CONTRAIL-CLEAR.
     - LW_RF_CLEAR_W_m2: Longwave radiative forcing for clear-sky conditions (no contrail)
     - LW_RF_CONTRAIL_W_m2: Longwave radiative forcing for contrail conditions (yes contrail)
 
+    Shortwave Output
+    - Contrail_Age_hours: Age of the contrail in hours
+    - SW_Radiative_Forcing_W_m2: Net shortwave radiative forcing in W/m2. Equal to CONTRAIL-CLEAR.
+    - SW_RF_CLEAR_W_m2: Shortwave radiative forcing for clear-sky conditions (no contrail)
+    - SW_RF_CONTRAIL_W_m2: Shortwave radiative forcing for contrail conditions (yes contrail)
+
 ### Notes
-- Ensure the data symlink points to a valid libRadtran data directory and that LIBRADTRAN inputs are available.
+- Ensure the data symlink points to a valid libRadtran data directory and that the input files are in the correct directory.
 - Inspect the .sh wrappers for required module/conda setup and command‑line arguments.
 - Drivers produce input files and results in the configured output paths, make sure to check these!
+- libRadtran documentation on the _many_ options for calculating radiative fluxes can be found at https://www.libradtran.org/doc/libRadtran.pdf
+- The example input files for running libRadtran are heavily commented to explain the options but is not exhaustive. Read the documentation and turn off the `quiet` option in the input file for the best debugging help.
