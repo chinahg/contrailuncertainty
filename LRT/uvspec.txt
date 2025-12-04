@@ -1,1 +1,0 @@
-/home/iross/misc-code/libRadtran/bin/uvspec
