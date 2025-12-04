@@ -84,7 +84,7 @@ def make_LW_options(habit, hour, ice_in_path):
         ["time", f"2025 6 29 {hour} 0 0", "Local time YYYY MM DD hh mm ss"],  # Example times
         ["albedo", "0.06", "Surface albedo over open ocean"],
         ["rte_solver", "disort", "Radiative transfer equation solver"],
-        ["mol_abs_param", "reptran", "Provides correlated-k absorption coefficients"],
+        ["mol_abs_param", "reptran fine", "Provides correlated-k absorption coefficients, fine band width of 1 cm-1"],
         ["number_of_streams", "16", "Number of discrete zenith-angle directions DISORT uses"],
         ["wavelength", "OVERWRITE", "Wavelength range [nm]"],
         ["zout", "TOA", "Sum at the top of atmosphere"],
@@ -136,14 +136,12 @@ def make_SW_options(LW_contrail_options):
     # SW is the same as LW except for the source and wavelength
     SW_contrail_options = LW_contrail_options.copy()
     SW_contrail_options.loc[SW_contrail_options["Name"] == "source", ["Value", "Description"]] = [
-        "solar data/solar_flux/atlas_plus_modtran",
+        "solar data/solar_flux/kurudz_1.0nm.dat",
         "Calculate the shortwave radiation, location of the extraterrestrial spectrum"
     ]
     SW_contrail_options.loc[SW_contrail_options["Name"] == "wavelength", ["Value", "Description"]] = [
-        # Bulk of shortwave solar radiation at the TOA is between 200-800 nm, higher than 800 nm and the atmosphere 
-        # absorbs more strongly due to water vapor and less light reaches the cloud
-        # 202 is chosen specifically because of lower wavelength limit of Baum_v36
-        "202 800", "Wavelength range [nm]" 
+        # Shortwave radiation wavelengths are approximately 300-3000 nm (Wang et al., 2021)
+        "300 3000", "Wavelength range [nm]" 
     ]
 
     SW_clearsky_options = SW_contrail_options[~SW_contrail_options["Name"].str.startswith("ic_")].reset_index(drop=True)

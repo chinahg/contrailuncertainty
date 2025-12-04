@@ -3,7 +3,7 @@ source thermal             # Calculate the longwave radiation
 latitude N 45             # Latitude of the location
 longitude W 45             # Longitude of the location
 time 2025 6 29 0 0 0             # Local time YYYY MM DD hh mm ss
-albedo 0.2             # Surface albedo
+albedo 0.06             # Surface albedo
 rte_solver disort             # Radiative transfer equation solver
 mol_abs_param reptran             # Fine structure parameter
 number_of_streams 6             # Number of streams
