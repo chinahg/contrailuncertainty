@@ -65,10 +65,12 @@ def my_ice_particle_survival_fraction(iwc, iwc_1):
     f_surv = np.ones_like(iwc)
     return f_surv
 
-def make_flight_csv(altitude_initial, base_flight_csv_path, number, new_flight_csv_path, T_LM, mdot_f, u, efficiency, f_surv, number_type, T):
+def make_flight_csv(altitude_initial, longitude, latitude, time, base_flight_csv_path, number, new_flight_csv_path, T_LM, mdot_f, u, efficiency, f_surv, number_type, T):
     # Update the CSV file with B767 characteristics
     df_flight = pd.read_csv(base_flight_csv_path)
 
+    df_flight["Longitude (degrees)"] = np.linspace(longitude, longitude + (len(df_flight) - 1)*0.25, len(df_flight)) # Set longitude
+    df_flight["Latitude (degrees)"] = latitude # Set latitude
     df_flight["Altitude (m)"] = altitude_initial # Set altitude to pre-vortex altitude, to account for sinking later
 
     df_flight["True airspeed (m s-1)"] = u
@@ -81,11 +83,13 @@ def make_flight_csv(altitude_initial, base_flight_csv_path, number, new_flight_c
     df_flight["Mach Number"] = M  # Set Mach number
     
     activation_rate = ice_particle_activation_rate(T, T_LM)
+    print(f"Activation rate: {activation_rate}")
     fuel_per_m = mdot_f / u  # [kg/m]
 
     # Calculate the initial EInvpm to match the LLES values after vortex sinking
     if number_type == "number per meter":
         EI_nvpm = number * (activation_rate * fuel_per_m * f_surv)**(-1)
+        print(f"Calculated EInvpm to match {number:.2e} nvpm/m after vortex sinking: {EI_nvpm:.2e} #/kg fuel")
     elif number_type == "EInvpm":
         EI_nvpm = number
 
@@ -96,8 +100,8 @@ def make_flight_csv(altitude_initial, base_flight_csv_path, number, new_flight_c
     df_flight["ICAO Aircraft Type"] = "B767"
     df_flight["Wingspan (m)"] = 47.25 # Set wingspan to 47.25 m
 
-    # Calculate the UTC time in seconds for Noon at 45N, 45W on June 29, 2025 at 60 second intervals
-    df_flight["UTC time"] = pd.date_range(start="2025-06-29 00:00:00", periods=len(df_flight), freq="60s").astype(np.int64) // 10**9
+    # Calculate the UTC time in seconds for Noon at 45N, 45W on June 29, 2025 at 83 second intervals (1/4 degree latitude travelled)
+    df_flight["UTC time"] = pd.date_range(start=time, periods=len(df_flight), freq="83s").astype(np.int64) // 10**9
     df_flight["time"] = pd.to_datetime(df_flight["UTC time"], origin="unix", unit="s") # Convert the UTC time to datetimes and assign to the "time" column
 
     # Save the updated DataFrame to a new CSV file
