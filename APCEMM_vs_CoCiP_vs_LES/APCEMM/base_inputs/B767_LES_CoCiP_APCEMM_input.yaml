@@ -127,7 +127,7 @@ SIMULATION MENU:
     OUTPUT SUBMENU:
         Output folder (string): BASE-UPDATE
         Overwrite if folder exists (T/F): T
-    OpenMP Num Threads (positive int): 8
+    OpenMP Num Threads (positive int): 1
     PARAM SWEEP SUBMENU:
         Num Monte Carlo runs (int): 2
         Parameter sweep (T/F): T
