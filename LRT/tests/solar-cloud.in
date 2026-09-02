@@ -1,0 +1,15 @@
+data_files_path /home/chinahg/GCresearch/contrailuncertainty/LRT/data             # Location of libRadtran data files
+source solar           # Calculate the shortwave radiation
+latitude N 45             # Latitude of the location
+longitude W 45             # Longitude of the location
+time 2025 6 29 12 0 0             # Local time YYYY MM DD hh mm ss
+albedo 0.06             # Surface albedo
+rte_solver disort
+number_of_streams 4
+wavelength 550
+rte_solver disort             # Radiative transfer equation solver
+number_of_streams 16             # Number of streams
+ic_file 1D /home/chinahg/GCresearch/contrailuncertainty/LRT/base_inputs/ice.in             # Ice properties input file
+ic_properties baum_v36 interpolate             # Ice properties
+ic_habit ghm             # Ice habit
+verbose

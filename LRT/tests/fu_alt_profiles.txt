@@ -1,0 +1,3 @@
+# To run libRadtran and get some of the intermediate properties: rayleigh, ice cloud, absorption tau
+
+LD_LIBRARY_PATH="/data/home/chinahg/.conda/envs/afca-test/lib:${LD_LIBRARY_PATH}" \/home/iross/misc-code/libRadtran/bin/uvspec < /home/chinahg/GCresearch/contrailuncertainty/LRT/tests/solar-cloud.in > /home/chinahg/GCresearch/contrailuncertainty/LRT/tests/output.txt 2> /home/chinahg/GCresearch/contrailuncertainty/LRT/tests/verbose.txt
