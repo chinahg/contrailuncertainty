@@ -12,3 +12,15 @@ AEIC_2022_30Nto60N/
 OAG2022.csv
 test_*/
 *.parquet
+testing/
+micro_sweeps_110_218/
+*_LRT.csv
+*h.in
+*.mp4
+*-rad-*.nc
+*-met-*.nc
+*_slice*.in
+epm_output.nc
+*ghm.nc
+*solid-column.nc
+*rough-aggregate.nc
